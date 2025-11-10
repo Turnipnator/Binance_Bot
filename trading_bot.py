@@ -179,13 +179,15 @@ class BinanceTradingBot:
             strategies['momentum'] = MomentumStrategy(
                 symbol=symbol,
                 allocation=Config.MOMENTUM_ALLOCATION,
-                client=self.client  # Pass client for 4H timeframe confirmation
+                client=self.client,  # Pass client for 4H timeframe confirmation
+                risk_manager=self.risk_manager  # Pass risk manager for fixed 5% stops
             )
 
         if Config.ENABLE_MEAN_REVERSION:
             strategies['mean_reversion'] = MeanReversionStrategy(
                 symbol=symbol,
-                allocation=Config.MEAN_REVERSION_ALLOCATION
+                allocation=Config.MEAN_REVERSION_ALLOCATION,
+                risk_manager=self.risk_manager  # Pass risk manager for fixed 5% stops
             )
 
         logger.info(f"Strategies initialized for {symbol}: {list(strategies.keys())}")

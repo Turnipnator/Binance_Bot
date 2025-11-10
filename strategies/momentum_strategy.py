@@ -31,7 +31,7 @@ class MomentumStrategy:
     - Exits when momentum weakens or reversal signals appear
     """
 
-    def __init__(self, symbol: str, allocation: float = 0.3, client=None):
+    def __init__(self, symbol: str, allocation: float = 0.3, client=None, risk_manager=None):
         """
         Initialize momentum strategy
 
@@ -39,6 +39,7 @@ class MomentumStrategy:
             symbol: Trading pair symbol
             allocation: Portfolio allocation for this strategy
             client: Binance client for fetching higher timeframe data
+            risk_manager: Risk manager instance for stop loss calculations
         """
         self.symbol = symbol
         self.allocation = allocation
@@ -46,6 +47,7 @@ class MomentumStrategy:
         self.entry_price = 0.0
         self.highest_price = 0.0
         self.client = client  # Store client for 4H data fetching
+        self.risk_manager = risk_manager
 
         logger.info(f"Momentum strategy initialized for {symbol}")
 
@@ -361,12 +363,18 @@ class MomentumStrategy:
         Returns:
             Stop loss price
         """
-        from config import Config
+        # Use risk manager's FIXED 5% stop loss for consistency
+        if self.risk_manager:
+            stop_loss = self.risk_manager.calculate_atr_stop_loss(entry_price, atr, 'long')
+            logger.debug(f"Using fixed 5% stop from risk manager: {stop_loss:.8f}")
+            return stop_loss
 
-        # Momentum trades can use tighter stops
+        # Fallback to ATR-based stop (shouldn't happen in production)
+        from config import Config
         stop_multiplier = Config.ATR_STOP_MULTIPLIER * 0.8  # 20% tighter than default
         stop_loss = entry_price - (atr * stop_multiplier)
 
+        logger.warning(f"Risk manager not available, using ATR-based stop: {stop_loss:.8f}")
         return stop_loss
 
     def calculate_take_profit(self, entry_price: float, stop_loss: float, risk_reward: float = 3.0) -> float:

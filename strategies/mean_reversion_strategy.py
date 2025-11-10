@@ -32,19 +32,21 @@ class MeanReversionStrategy:
     - Works best in ranging, non-trending markets
     """
 
-    def __init__(self, symbol: str, allocation: float = 0.2):
+    def __init__(self, symbol: str, allocation: float = 0.2, risk_manager=None):
         """
         Initialize mean reversion strategy
 
         Args:
             symbol: Trading pair symbol
             allocation: Portfolio allocation for this strategy
+            risk_manager: Risk manager instance for stop loss calculations
         """
         self.symbol = symbol
         self.allocation = allocation
         self.in_position = False
         self.entry_price = 0.0
         self.mean_price = 0.0
+        self.risk_manager = risk_manager
 
         logger.info(f"Mean reversion strategy initialized for {symbol}")
 
@@ -233,14 +235,20 @@ class MeanReversionStrategy:
         Returns:
             Stop loss price
         """
-        # Mean reversion uses tighter stops
-        stop_multiplier = 2.0
+        # Use risk manager's FIXED 5% stop loss for consistency
+        if self.risk_manager:
+            stop_loss = self.risk_manager.calculate_atr_stop_loss(entry_price, atr, side)
+            logger.debug(f"Using fixed 5% stop from risk manager: {stop_loss:.8f}")
+            return stop_loss
 
+        # Fallback to ATR-based stop (shouldn't happen in production)
+        stop_multiplier = 2.0
         if side == 'long':
             stop_loss = entry_price - (atr * stop_multiplier)
         else:
             stop_loss = entry_price + (atr * stop_multiplier)
 
+        logger.warning(f"Risk manager not available, using ATR-based stop: {stop_loss:.8f}")
         return stop_loss
 
     def calculate_take_profit(self, entry_price: float, mean_price: float, side: str = 'long') -> float:
