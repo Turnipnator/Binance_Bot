@@ -1,0 +1,38 @@
+# Core Dependencies
+python-binance>=1.0.19
+ccxt>=4.2.25
+
+# Technical Analysis
+pandas>=2.2.0
+numpy>=1.26.0
+pandas-ta>=0.3.14b0
+ta>=0.11.0
+
+# Async Operations
+# asyncio is built into Python 3.7+, no need to install separately
+aiohttp>=3.9.1
+
+# Data Storage
+sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+
+# Configuration & Environment
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Logging & Monitoring
+loguru>=0.7.2
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Security
+cryptography>=42.0.0
+
+# Utilities
+requests>=2.31.0
+websockets>=12.0
+
+# Machine Learning (Optional - for advanced features)
+scikit-learn>=1.4.0
+scipy>=1.12.0
