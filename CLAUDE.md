@@ -1,5 +1,35 @@
 # Cryptocurrency Trading Bot Strategy & Implementation Guide
 
+## CRITICAL: Git Workflow for All Code Changes
+
+**MANDATORY PROCEDURE - MUST FOLLOW FOR EVERY CODE CHANGE:**
+
+Whenever you make ANY code changes to this bot, you MUST immediately:
+
+1. **Commit locally** with descriptive message
+2. **Push to GitHub** repository (https://github.com/Turnipnator/Binance_Bot)
+3. **Sync VPS** if changes affect production
+
+**Git Commands to Use:**
+```bash
+# On VPS (where git repo is):
+ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cd /opt/Binance_Bot && \
+  git add [files] && \
+  git commit -m 'Description of changes
+
+🤖 Generated with Claude Code
+
+Co-Authored-By: Claude <noreply@anthropic.com>' && \
+  git push origin main"
+
+# On local MacBook (sync from GitHub):
+git fetch origin main && git reset --hard origin/main
+```
+
+**DO NOT SKIP THIS STEP** - The user needs all changes version controlled and synced across local MacBook, VPS, and GitHub.
+
+---
+
 ## Executive Summary
 
 This comprehensive guide presents a complete framework for building profitable cryptocurrency trading bots in 2025, based on current market research showing **over 60% of cryptocurrency trading volume now flows through automated systems**. The most successful bots are achieving **12-25% annualized returns** using sophisticated grid trading and AI-enhanced strategies. With Bitcoin surpassing $100,000 and total crypto market cap exceeding $4.11 trillion, the infrastructure and opportunities for systematic trading have reached unprecedented maturity.
