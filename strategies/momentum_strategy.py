@@ -282,6 +282,14 @@ class MomentumStrategy:
             logger.debug(f"RSI overbought: {rsi:.1f}")
             return False, momentum_score, momentum_data
 
+        # CRITICAL: CHOPPY MARKET FILTER
+        # Reject sideways/ranging markets to avoid false breakouts (like enclave bot)
+        # Only trade when trend is clearly bullish, not choppy/sideways
+        trend = technical_data.get('trend', 'sideways')
+        if trend == 'sideways':
+            logger.info(f"❌ CHOPPY market filter: {self.symbol} trend is SIDEWAYS - rejecting entry (score was {momentum_score:.2f})")
+            return False, momentum_score, momentum_data
+
         # Check trend
         if not momentum_data['trend_bullish']:
             logger.debug("Trend not bullish")
