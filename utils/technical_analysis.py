@@ -281,7 +281,11 @@ class TechnicalAnalysis:
 
     def identify_trend(self) -> str:
         """
-        Identify current market trend
+        Identify current market trend using 3-layer detection
+
+        Layer 1: ATR-based range detection (catches tight ranges)
+        Layer 2: Price structure analysis (higher highs/lower lows)
+        Layer 3: EMA alignment (confirms direction)
 
         Returns:
             'bullish', 'bearish', or 'sideways'
@@ -290,31 +294,66 @@ class TechnicalAnalysis:
 
         recent = self.df.tail(20)
 
-        # Get EMA values with None handling
+        # Get values with None handling
         try:
             ema_fast = recent['ema_fast'].iloc[-1]
             ema_slow = recent['ema_slow'].iloc[-1]
             ema_trend = recent['ema_trend'].iloc[-1]
-            close_now = recent['close'].iloc[-1]
-            close_prev = recent['close'].iloc[0]
+            current_price = recent['close'].iloc[-1]
+            atr = recent['atr'].iloc[-1]
 
             # Check if any values are NaN
-            if pd.isna(ema_fast) or pd.isna(ema_slow) or pd.isna(ema_trend):
+            if pd.isna(ema_fast) or pd.isna(ema_slow) or pd.isna(ema_trend) or pd.isna(atr):
                 return 'sideways'
 
-            # Check EMA alignment
+            # === LAYER 1: ATR-based Range Detection ===
+            # If price is oscillating in a tight range relative to volatility = RANGING
+            recent_10 = recent.tail(10)
+            recent_high = recent_10['high'].max()
+            recent_low = recent_10['low'].min()
+            price_range_pct = (recent_high - recent_low) / current_price
+            atr_pct = atr / current_price
+
+            # If price range < 2x ATR, it's ranging/choppy
+            if price_range_pct < (atr_pct * 2):
+                return 'sideways'
+
+            # === LAYER 2: Price Structure Analysis ===
+            # Check if making higher highs AND higher lows (uptrend structure)
+            # or lower highs AND lower lows (downtrend structure)
+            first_half = recent.iloc[:10]
+            second_half = recent.iloc[10:]
+
+            first_half_high = first_half['high'].max()
+            second_half_high = second_half['high'].max()
+            first_half_low = first_half['low'].min()
+            second_half_low = second_half['low'].min()
+
+            higher_highs = second_half_high > first_half_high
+            higher_lows = second_half_low > first_half_low
+            lower_highs = second_half_high < first_half_high
+            lower_lows = second_half_low < first_half_low
+
+            # Determine price structure
+            structure_bullish = higher_highs and higher_lows
+            structure_bearish = lower_highs and lower_lows
+
+            # Mixed/choppy structure - reject
+            if not structure_bullish and not structure_bearish:
+                return 'sideways'
+
+            # === LAYER 3: EMA Alignment Confirmation ===
             ema_bullish = ema_fast > ema_slow > ema_trend
             ema_bearish = ema_fast < ema_slow < ema_trend
 
-            # Check price trend
-            price_rising = close_now > close_prev
-
-            if ema_bullish and price_rising:
+            # Only return bullish if ALL layers confirm
+            if structure_bullish and ema_bullish:
                 return 'bullish'
-            elif ema_bearish and not price_rising:
+            elif structure_bearish and ema_bearish:
                 return 'bearish'
             else:
                 return 'sideways'
+
         except (TypeError, ValueError, IndexError):
             return 'sideways'
 
