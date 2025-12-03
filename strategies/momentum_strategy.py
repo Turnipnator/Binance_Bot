@@ -251,7 +251,7 @@ class MomentumStrategy:
             # On error, don't block trades (fail open)
             return True, f"4H check error (bypassed): {str(e)[:50]}"
 
-    def should_enter_long(self, technical_data: Dict, min_score: float = 0.55) -> Tuple[bool, float, Dict]:
+    def should_enter_long(self, technical_data: Dict, min_score: float = 0.50) -> Tuple[bool, float, Dict]:
         """
         Determine if should enter long position
 
