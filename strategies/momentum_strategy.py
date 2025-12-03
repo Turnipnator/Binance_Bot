@@ -302,16 +302,16 @@ class MomentumStrategy:
             logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.0x)")
             return False, momentum_score, momentum_data
 
-        # CRITICAL: Check 4H timeframe confirmation
-        # This filters out false 1H breakouts that don't have higher timeframe support
-        htf_confirmed, htf_reason = self.check_higher_timeframe_confirmation()
-        if not htf_confirmed:
-            logger.info(f"4H filter rejection for {self.symbol}: {htf_reason} (1H score was {momentum_score:.2f})")
-            return False, momentum_score, momentum_data
+        # 4H timeframe confirmation DISABLED for testnet (insufficient historical data)
+        # Other filters (3-layer trend, CHOPPY, momentum, volume) provide confirmation
+        # htf_confirmed, htf_reason = self.check_higher_timeframe_confirmation()
+        # if not htf_confirmed:
+        #     logger.info(f"4H filter rejection for {self.symbol}: {htf_reason} (1H score was {momentum_score:.2f})")
+        #     return False, momentum_score, momentum_data
 
-        # All conditions met (1H + 4H confirmed)
+        # All conditions met
         confidence = momentum_score
-        logger.info(f"✅ Momentum entry signal: score={momentum_score:.2f}, confidence={confidence:.2f}, volume={volume_ratio:.2f}x [4H CONFIRMED]")
+        logger.info(f"✅ Momentum entry signal: score={momentum_score:.2f}, confidence={confidence:.2f}, volume={volume_ratio:.2f}x")
 
         return True, confidence, momentum_data
 
