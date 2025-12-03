@@ -423,7 +423,7 @@ class BinanceTradingBot:
             if not momentum_strat.in_position:
                 should_enter, confidence, _ = momentum_strat.should_enter_long(latest_data)
 
-                if should_enter and confidence > 0.60:
+                if should_enter and confidence >= 0.50:  # Match momentum threshold
                     signal = momentum_strat.generate_signal(latest_data)
                     if signal:
                         await self._execute_entry(
