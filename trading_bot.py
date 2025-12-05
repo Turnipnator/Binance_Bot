@@ -703,8 +703,23 @@ class BinanceTradingBot:
             await asyncio.sleep(300)  # Update every 5 minutes
 
             try:
-                # Check for stale positions (safety mechanism)
-                self.risk_manager.check_stale_positions()
+                # Check for stale positions (safety mechanism) - now returns info for notifications
+                stale_positions = self.risk_manager.check_stale_positions()
+
+                # Send Telegram notifications for any stale positions that were closed
+                if stale_positions and self.telegram_bot:
+                    for pos_info in stale_positions:
+                        try:
+                            await self.telegram_bot.notify_trade_closed(
+                                symbol=pos_info['symbol'],
+                                entry_price=pos_info['entry_price'],
+                                exit_price=pos_info['exit_price'],
+                                pnl=pos_info['pnl'],
+                                pnl_pct=pos_info['pnl_pct'],
+                                reason=pos_info['reason']
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send stale position notification for {pos_info['symbol']}: {e}")
 
                 summary = self.risk_manager.get_portfolio_summary()
 

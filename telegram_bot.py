@@ -505,8 +505,10 @@ class TelegramBot:
         """
         try:
             if not self.app:
+                logger.warning("Telegram notification skipped - bot not initialized (self.app is None)")
                 return
 
+            logger.debug(f"Sending Telegram notification to {len(self.authorized_users)} users")
             for user_id in self.authorized_users:
                 try:
                     await self.app.bot.send_message(
@@ -515,6 +517,7 @@ class TelegramBot:
                         parse_mode='Markdown'
                     )
                     self.notifications_sent += 1
+                    logger.info(f"Telegram notification sent to user {user_id}")
                 except Exception as e:
                     logger.error(f"Failed to send notification to {user_id}: {e}")
 

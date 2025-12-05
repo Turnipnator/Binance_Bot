@@ -91,7 +91,7 @@ class RiskManager:
         # Additional safeguards (prevent infinite retry loops)
         self.position_close_attempts: Dict[str, int] = {}  # Track failed close attempts
         self.max_close_attempts = 3  # Max retries before forcing position removal
-        self.max_position_age_hours = 24  # Remove stale positions after 24 hours
+        self.max_position_age_hours = 72  # Remove stale positions after 72 hours (3 days)
 
         # Persistent daily P&L tracking
         self.daily_pnl_file = './data/daily_pnl.json'
@@ -275,33 +275,73 @@ class RiskManager:
                 f"failed for {symbol}"
             )
 
-    def check_stale_positions(self):
+    def check_stale_positions(self) -> List[Dict]:
         """
-        Remove positions that have been open too long (safety mechanism)
-        Prevents positions from staying open forever due to errors
+        Check for and close positions that have been open too long (safety mechanism)
+        Properly closes positions with current price to track PnL.
+
+        Returns:
+            List of closed stale position info dicts for Telegram notification
         """
         now = datetime.now().timestamp()
-        stale_symbols = []
+        stale_positions_info = []
 
+        # First pass: identify stale positions
+        stale_symbols = []
         for symbol, position in self.positions.items():
             age_hours = (now - position.timestamp) / 3600
 
             if age_hours > self.max_position_age_hours:
-                logger.warning(
-                    f"Removing STALE position: {symbol} "
-                    f"(open for {age_hours:.1f} hours, max is {self.max_position_age_hours})"
-                )
-                stale_symbols.append(symbol)
+                stale_symbols.append((symbol, position, age_hours))
 
-        # Remove stale positions
-        for symbol in stale_symbols:
-            del self.positions[symbol]
+        # Second pass: properly close stale positions
+        for symbol, position, age_hours in stale_symbols:
+            logger.warning(
+                f"Closing STALE position: {symbol} "
+                f"(open for {age_hours:.1f} hours, max is {self.max_position_age_hours})"
+            )
+
+            # Use current_price if available, otherwise use entry_price
+            exit_price = position.current_price if position.current_price > 0 else position.entry_price
+
+            # Calculate PnL before closing
+            position.current_price = exit_price
+            pnl = position.unrealized_pnl
+            pnl_pct = position.unrealized_pnl_pct
+
+            # Store info for notification BEFORE closing
+            stale_positions_info.append({
+                'symbol': symbol,
+                'entry_price': position.entry_price,
+                'exit_price': exit_price,
+                'quantity': position.quantity,
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+                'age_hours': age_hours,
+                'reason': f'Stale position ({age_hours:.1f}h > {self.max_position_age_hours}h max)'
+            })
+
+            # Properly close the position (tracks PnL, updates balance, etc.)
+            try:
+                self.close_position(symbol, exit_price)
+                logger.warning(
+                    f"Stale position closed: {symbol} - "
+                    f"PnL: ${pnl:.2f} ({pnl_pct:.2f}%) after {age_hours:.1f} hours"
+                )
+            except Exception as e:
+                logger.error(f"Error closing stale position {symbol}: {e}")
+                # Force remove if close fails
+                if symbol in self.positions:
+                    del self.positions[symbol]
+
             # Reset close attempts counter
             if symbol in self.position_close_attempts:
                 del self.position_close_attempts[symbol]
 
-        if stale_symbols:
-            logger.warning(f"Removed {len(stale_symbols)} stale positions: {', '.join(stale_symbols)}")
+        if stale_positions_info:
+            logger.warning(f"Closed {len(stale_positions_info)} stale positions: {', '.join([p['symbol'] for p in stale_positions_info])}")
+
+        return stale_positions_info
 
     def _increment_symbol_trades(self, symbol: str):
         """Increment trade count for a symbol"""
