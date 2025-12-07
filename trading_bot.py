@@ -351,24 +351,33 @@ class BinanceTradingBot:
             await self._close_position(symbol, current_price, "Stop loss")
             return
 
-        # NO TAKE PROFIT - Let winners run with 5% trailing stop!
+        # DYNAMIC STOP LOSS SYSTEM:
+        # Stage 1 (0-2% profit): Original 5% stop loss from entry
+        # Stage 2 (2%+ profit): Breakeven stop (entry price) - NEVER turn a winner into a loser
+        # Stage 3 (3%+ profit): 3% trailing stop from highest price
 
-        # Update trailing stop - activates after 0.5% profit, then stays active
-        # Lower threshold = earlier protection, but still lets trends develop
-        if position.side == 'BUY' and position.highest_price > position.entry_price * 1.005:
-            # Trailing stop is now ACTIVE - calculate from HIGHEST price reached
-            trailing_stop = self.risk_manager.calculate_trailing_stop(
-                current_price,
-                position.highest_price,  # Use highest price, not current!
-                atr,
-                'long'
-            )
+        if position.side == 'BUY':
+            profit_pct = ((position.highest_price - position.entry_price) / position.entry_price) * 100
 
-            # Check if current price has dropped to trailing stop level
-            if current_price <= trailing_stop:
-                logger.info(f"Trailing stop hit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f})")
-                await self._close_position(symbol, current_price, "Trailing stop")
-                return
+            # Stage 3: 3% trailing stop (activates at 3%+ profit from high)
+            if profit_pct >= 3.0:
+                trailing_stop = position.highest_price * 0.97  # 3% below highest
+
+                if current_price <= trailing_stop:
+                    logger.info(f"Trailing stop hit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f}, trail 3%)")
+                    await self._close_position(symbol, current_price, "Trailing stop")
+                    return
+
+            # Stage 2: Breakeven stop (activates at 2%+ profit)
+            elif profit_pct >= 2.0:
+                breakeven_stop = position.entry_price  # Stop at entry = breakeven
+
+                if current_price <= breakeven_stop:
+                    logger.info(f"Breakeven stop hit for {symbol} at ${current_price:.2f} (was up {profit_pct:.1f}%)")
+                    await self._close_position(symbol, current_price, "Breakeven stop")
+                    return
+
+            # Stage 1: Original stop loss (handled above at line 349)
 
         # Check strategy-specific exit conditions
         strategies = self.strategies[symbol]
@@ -423,7 +432,7 @@ class BinanceTradingBot:
             if not momentum_strat.in_position:
                 should_enter, confidence, _ = momentum_strat.should_enter_long(latest_data)
 
-                if should_enter and confidence >= 0.50:  # Match momentum threshold
+                if should_enter and confidence >= 0.60:  # Match momentum threshold
                     signal = momentum_strat.generate_signal(latest_data)
                     if signal:
                         await self._execute_entry(

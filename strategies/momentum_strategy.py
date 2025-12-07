@@ -251,7 +251,7 @@ class MomentumStrategy:
             # On error, don't block trades (fail open)
             return True, f"4H check error (bypassed): {str(e)[:50]}"
 
-    def should_enter_long(self, technical_data: Dict, min_score: float = 0.50) -> Tuple[bool, float, Dict]:
+    def should_enter_long(self, technical_data: Dict, min_score: float = 0.60) -> Tuple[bool, float, Dict]:
         """
         Determine if should enter long position
 
@@ -282,12 +282,12 @@ class MomentumStrategy:
             logger.debug(f"RSI overbought: {rsi:.1f}")
             return False, momentum_score, momentum_data
 
-        # CRITICAL: CHOPPY MARKET FILTER
-        # Reject sideways/ranging markets to avoid false breakouts (like enclave bot)
-        # Only trade when trend is clearly bullish, not choppy/sideways
+        # CRITICAL: TREND FILTER - Require BULLISH trend
+        # Only trade when trend is clearly bullish - reject sideways AND bearish
+        # This prevents weak signals in ranging or downtrending markets
         trend = technical_data.get('trend', 'sideways')
-        if trend == 'sideways':
-            logger.info(f"❌ CHOPPY market filter: {self.symbol} trend is SIDEWAYS - rejecting entry (score was {momentum_score:.2f})")
+        if trend != 'bullish':
+            logger.info(f"❌ Trend filter: {self.symbol} trend is {trend.upper()} - only BULLISH allowed (score was {momentum_score:.2f})")
             return False, momentum_score, momentum_data
 
         # Check trend

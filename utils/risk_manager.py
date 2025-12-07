@@ -496,15 +496,15 @@ class RiskManager:
         Returns:
             Trailing stop price
         """
-        # Fixed 5% trailing stop - SIMPLE AND EFFECTIVE
-        # Lets winners run, no arbitrary take profit
-        TRAILING_STOP_PERCENT = 0.05  # 5%
+        # 3% trailing stop - tighter to protect gains
+        # Combined with breakeven stop at 2%, this prevents turning winners into losers
+        TRAILING_STOP_PERCENT = 0.03  # 3%
 
         if position_type == 'long':
-            # Long: Stop 5% below highest price reached
+            # Long: Stop 3% below highest price reached
             trailing_stop = highest_price * (1 - TRAILING_STOP_PERCENT)
         else:
-            # Short: Stop 5% above lowest price reached
+            # Short: Stop 3% above lowest price reached
             trailing_stop = highest_price * (1 + TRAILING_STOP_PERCENT)
 
         return trailing_stop
