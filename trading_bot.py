@@ -364,8 +364,11 @@ class BinanceTradingBot:
                 trailing_stop = position.highest_price * 0.97  # 3% below highest
 
                 if current_price <= trailing_stop:
-                    logger.info(f"Trailing stop hit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f}, trail 3%)")
-                    await self._close_position(symbol, current_price, "Trailing stop")
+                    # Exit at trailing stop level, not gapped-down current price
+                    # This simulates a stop order that fills at the stop level
+                    exit_price = trailing_stop
+                    logger.info(f"Trailing stop hit for {symbol} - exiting at ${exit_price:.2f} (high was ${position.highest_price:.2f}, current ${current_price:.2f})")
+                    await self._close_position(symbol, exit_price, "Trailing stop")
                     return
 
             # Stage 2: Breakeven stop (activates at 2%+ profit)
@@ -373,8 +376,11 @@ class BinanceTradingBot:
                 breakeven_stop = position.entry_price  # Stop at entry = breakeven
 
                 if current_price <= breakeven_stop:
-                    logger.info(f"Breakeven stop hit for {symbol} at ${current_price:.2f} (was up {profit_pct:.1f}%)")
-                    await self._close_position(symbol, current_price, "Breakeven stop")
+                    # Exit at breakeven price (entry), not current price
+                    # This simulates a stop order that fills at the stop level
+                    exit_price = breakeven_stop  # Use entry price, not gapped-down current price
+                    logger.info(f"Breakeven stop hit for {symbol} - exiting at ${exit_price:.2f} (was up {profit_pct:.1f}%, current ${current_price:.2f})")
+                    await self._close_position(symbol, exit_price, "Breakeven stop")
                     return
 
             # Stage 1: Original stop loss (handled above at line 349)
