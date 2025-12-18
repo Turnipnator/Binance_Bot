@@ -97,8 +97,13 @@ class RiskManager:
         self.daily_pnl_file = './data/daily_pnl.json'
         self._load_daily_pnl()
 
+        # Persistent positions tracking
+        self.positions_file = './data/positions.json'
+        self._load_positions()
+
         logger.info(f"Risk Manager initialized with balance: ${initial_balance:,.2f}")
         logger.info(f"Daily P&L loaded: ${self.daily_pnl:.2f} ({self.daily_trades} trades today)")
+        logger.info(f"Loaded {len(self.positions)} open positions from file")
 
     def _load_daily_pnl(self):
         """Load daily P&L from persistent storage"""
@@ -156,6 +161,68 @@ class RiskManager:
             logger.debug(f"Saved daily P&L: ${self.daily_pnl:.2f}")
         except Exception as e:
             logger.error(f"Error saving daily P&L: {e}")
+
+    def _save_positions(self):
+        """Save open positions to persistent storage"""
+        try:
+            positions_data = {}
+            for symbol, position in self.positions.items():
+                positions_data[symbol] = {
+                    'symbol': position.symbol,
+                    'side': position.side,
+                    'entry_price': position.entry_price,
+                    'quantity': position.quantity,
+                    'stop_loss': position.stop_loss,
+                    'take_profit': position.take_profit,
+                    'timestamp': position.timestamp,
+                    'current_price': position.current_price,
+                    'highest_price': position.highest_price
+                }
+
+            data = {
+                'last_updated': datetime.now().isoformat(),
+                'positions': positions_data
+            }
+
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.positions_file), exist_ok=True)
+
+            with open(self.positions_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            logger.debug(f"Saved {len(positions_data)} positions to file")
+        except Exception as e:
+            logger.error(f"Error saving positions: {e}")
+
+    def _load_positions(self):
+        """Load open positions from persistent storage"""
+        try:
+            if os.path.exists(self.positions_file):
+                with open(self.positions_file, 'r') as f:
+                    data = json.load(f)
+
+                positions_data = data.get('positions', {})
+
+                for symbol, pos_data in positions_data.items():
+                    position = Position(
+                        symbol=pos_data['symbol'],
+                        side=pos_data['side'],
+                        entry_price=pos_data['entry_price'],
+                        quantity=pos_data['quantity'],
+                        stop_loss=pos_data['stop_loss'],
+                        take_profit=pos_data['take_profit'],
+                        timestamp=pos_data['timestamp'],
+                        current_price=pos_data.get('current_price', 0.0),
+                        highest_price=pos_data.get('highest_price', pos_data['entry_price'])
+                    )
+                    self.positions[symbol] = position
+
+                logger.info(f"Loaded {len(self.positions)} positions from file")
+            else:
+                logger.info("No positions file found, starting fresh")
+        except Exception as e:
+            logger.error(f"Error loading positions: {e}")
+            self.positions = {}
 
     def sync_balance_from_exchange(self, client) -> bool:
         """
@@ -639,21 +706,31 @@ class RiskManager:
         self.positions[symbol] = position
         logger.info(f"Position added: {symbol} {side} @ {entry_price:.8f}")
 
+        # Save positions to persistent storage
+        self._save_positions()
+
     def update_position_price(self, symbol: str, current_price: float):
         """Update current price and track highest price for trailing stop"""
         if symbol in self.positions:
             position = self.positions[symbol]
             position.current_price = current_price
+            price_changed = False
 
             # Track highest price for long positions (for trailing stop)
             if position.side == 'BUY':
                 if current_price > position.highest_price:
                     position.highest_price = current_price
+                    price_changed = True
                     logger.debug(f"{symbol} new high: ${current_price:.2f}")
             # Track lowest price for short positions
             elif position.side == 'SELL':
                 if position.highest_price == 0 or current_price < position.highest_price:
                     position.highest_price = current_price  # For shorts, this tracks the lowest
+                    price_changed = True
+
+            # Save positions when high/low changes (persist state)
+            if price_changed:
+                self._save_positions()
 
     def close_position(self, symbol: str, exit_price: float) -> Optional[float]:
         """
@@ -695,6 +772,9 @@ class RiskManager:
             # Remove position (CRITICAL - must happen even if errors above)
             del self.positions[symbol]
 
+            # Save positions to persistent storage (after deletion)
+            self._save_positions()
+
             # Save daily P&L to persistent storage
             self._save_daily_pnl()
 
@@ -715,6 +795,7 @@ class RiskManager:
                 logger.error(f"Max close attempts reached for {symbol} - FORCING REMOVAL!")
                 if symbol in self.positions:
                     del self.positions[symbol]
+                    self._save_positions()  # Persist the removal
                 self.position_close_attempts[symbol] = 0
 
             # Re-raise to alert calling code
