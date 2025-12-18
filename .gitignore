@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# Local Claude instructions (contains VPS IP, SSH paths)
+CLAUDE.local.md
+
 # Python
 __pycache__/
 *.py[cod]

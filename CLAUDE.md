@@ -5,19 +5,10 @@
 **MANDATORY for ALL code changes:**
 
 1. Commit locally with descriptive message
-2. Push to GitHub: https://github.com/Turnipnator/Binance_Bot
+2. Push to GitHub
 3. Sync VPS if changes affect production
 
-```bash
-# Push from local:
-git add [files] && git commit -m "Description" && git push origin main
-
-# Sync VPS:
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cd /opt/Binance_Bot && git fetch origin main && git reset --hard origin/main"
-
-# Restart bot on VPS:
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "pkill -f 'python.*trading_bot' && cd /opt/Binance_Bot && source venv/bin/activate && nohup python -u trading_bot.py > logs/bot.log 2>&1 &"
-```
+See **CLAUDE.local.md** for VPS connection details and commands.
 
 ---
 
@@ -56,31 +47,6 @@ BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, AVAXUSDT, NEARUSDT, APTUSDT, SEIUSDT, ZECUSD
 ### Data Files
 - `data/positions.json` - Open positions (survives restarts)
 - `data/daily_pnl.json` - Daily P&L tracking
-
----
-
-## VPS Connection
-
-```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63
-```
-
-Bot location: `/opt/Binance_Bot`
-
-### Useful Commands
-```bash
-# Check if bot running:
-ps aux | grep trading_bot
-
-# View recent logs:
-tail -100 /opt/Binance_Bot/logs/bot.log
-
-# Check positions file:
-cat /opt/Binance_Bot/data/positions.json
-
-# Check daily PnL:
-cat /opt/Binance_Bot/data/daily_pnl.json
-```
 
 ---
 
