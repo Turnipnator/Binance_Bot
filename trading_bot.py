@@ -351,39 +351,23 @@ class BinanceTradingBot:
             await self._close_position(symbol, current_price, "Stop loss")
             return
 
-        # DYNAMIC STOP LOSS SYSTEM:
-        # Stage 1 (0-2% profit): Original 5% stop loss from entry
-        # Stage 2 (2%+ profit): Breakeven stop (entry price) - NEVER turn a winner into a loser
-        # Stage 3 (3%+ profit): 3% trailing stop from highest price
+        # SIMPLE TP/SL SYSTEM:
+        # Take Profit: 1.3% - lock in gains quickly, re-enter if still bullish
+        # Stop Loss: 5% - handled above
+
+        TAKE_PROFIT_PCT = 1.3  # 1.3% take profit
 
         if position.side == 'BUY':
-            profit_pct = ((position.highest_price - position.entry_price) / position.entry_price) * 100
+            current_profit_pct = ((current_price - position.entry_price) / position.entry_price) * 100
 
-            # Stage 3: 3% trailing stop (activates at 3%+ profit from high)
-            if profit_pct >= 3.0:
-                trailing_stop = position.highest_price * 0.97  # 3% below highest
+            # Take profit at 1.3%
+            if current_profit_pct >= TAKE_PROFIT_PCT:
+                take_profit_price = position.entry_price * (1 + TAKE_PROFIT_PCT / 100)
+                logger.info(f"🎯 Take profit hit for {symbol} - exiting at ${take_profit_price:.2f} (+{TAKE_PROFIT_PCT}%)")
+                await self._close_position(symbol, take_profit_price, "Take profit")
+                return
 
-                if current_price <= trailing_stop:
-                    # Exit at trailing stop level, not gapped-down current price
-                    # This simulates a stop order that fills at the stop level
-                    exit_price = trailing_stop
-                    logger.info(f"Trailing stop hit for {symbol} - exiting at ${exit_price:.2f} (high was ${position.highest_price:.2f}, current ${current_price:.2f})")
-                    await self._close_position(symbol, exit_price, "Trailing stop")
-                    return
-
-            # Stage 2: Breakeven stop (activates at 2%+ profit)
-            elif profit_pct >= 2.0:
-                breakeven_stop = position.entry_price  # Stop at entry = breakeven
-
-                if current_price <= breakeven_stop:
-                    # Exit at breakeven price (entry), not current price
-                    # This simulates a stop order that fills at the stop level
-                    exit_price = breakeven_stop  # Use entry price, not gapped-down current price
-                    logger.info(f"Breakeven stop hit for {symbol} - exiting at ${exit_price:.2f} (was up {profit_pct:.1f}%, current ${current_price:.2f})")
-                    await self._close_position(symbol, exit_price, "Breakeven stop")
-                    return
-
-            # Stage 1: Original stop loss (handled above at line 349)
+            # Stop loss handled above (5% from entry)
 
         # Check strategy-specific exit conditions
         strategies = self.strategies[symbol]
