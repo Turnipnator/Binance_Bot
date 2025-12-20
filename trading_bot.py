@@ -342,6 +342,15 @@ class BinanceTradingBot:
         current_price = latest_data['price']
         atr = latest_data['atr']
 
+        # SANITY CHECK: Reject obviously bad price data
+        # If price moved more than 8% from last known price in a single tick, it's likely bad API data
+        last_known_price = position.current_price if position.current_price > 0 else position.entry_price
+        price_change_pct = abs(current_price - last_known_price) / last_known_price * 100
+
+        if price_change_pct > 8:
+            logger.error(f"⚠️ BAD DATA REJECTED for {symbol}: Price ${current_price:.2f} is {price_change_pct:.1f}% from last price ${last_known_price:.2f} - ignoring this tick")
+            return
+
         # Update position price
         self.risk_manager.update_position_price(symbol, current_price)
 
