@@ -343,22 +343,42 @@ class BinanceTradingBot:
         atr = latest_data['atr']
 
         # SANITY CHECK: Reject obviously bad price data
-        # If price moved more than 8% from last known price in a single tick, it's likely bad API data
+        # If price moved more than 5% from last known price in a single tick, it's likely bad API data
         last_known_price = position.current_price if position.current_price > 0 else position.entry_price
         price_change_pct = abs(current_price - last_known_price) / last_known_price * 100
 
-        if price_change_pct > 8:
+        if price_change_pct > 5:
             logger.error(f"⚠️ BAD DATA REJECTED for {symbol}: Price ${current_price:.2f} is {price_change_pct:.1f}% from last price ${last_known_price:.2f} - ignoring this tick")
             return
 
-        # Update position price
+        # Update position price (only after sanity check passes)
         self.risk_manager.update_position_price(symbol, current_price)
 
-        # Check stop loss
+        # Check stop loss with CONFIRMATION requirement
+        # Bad API data typically corrects within 1-2 ticks, so require 2 consecutive readings below stop
         if position.side == 'BUY' and current_price <= position.stop_loss:
-            logger.warning(f"Stop loss hit for {symbol} at ${current_price:.2f}")
-            await self._close_position(symbol, current_price, "Stop loss")
-            return
+            # Initialize or increment stop loss hit counter
+            if not hasattr(self, '_stop_loss_confirmations'):
+                self._stop_loss_confirmations = {}
+
+            prev_count = self._stop_loss_confirmations.get(symbol, 0)
+            self._stop_loss_confirmations[symbol] = prev_count + 1
+
+            if self._stop_loss_confirmations[symbol] >= 2:
+                # Confirmed - 2 consecutive ticks below stop
+                logger.warning(f"Stop loss CONFIRMED for {symbol} at ${current_price:.2f} (2 consecutive ticks)")
+                await self._close_position(symbol, position.stop_loss, "Stop loss")  # Exit at stop level, not bad price
+                self._stop_loss_confirmations[symbol] = 0
+                return
+            else:
+                logger.warning(f"⚠️ Stop loss triggered for {symbol} at ${current_price:.2f} - waiting for confirmation (1/2)")
+                return
+        else:
+            # Price recovered or above stop - reset counter
+            if hasattr(self, '_stop_loss_confirmations') and symbol in self._stop_loss_confirmations:
+                if self._stop_loss_confirmations[symbol] > 0:
+                    logger.info(f"✅ {symbol} price recovered to ${current_price:.2f} - stop loss NOT triggered (was bad data)")
+                self._stop_loss_confirmations[symbol] = 0
 
         # SIMPLE TP/SL SYSTEM:
         # Take Profit: 1.3% - lock in gains quickly, re-enter if still bullish
