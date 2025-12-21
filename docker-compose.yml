@@ -19,6 +19,7 @@ services:
       - LOG_TO_FILE=false  # Use docker logs instead of file logging
 
       # Trading Configuration
+      - TRADING_PAIRS=${TRADING_PAIRS:-BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT}
       - MAX_DAILY_LOSS=${MAX_DAILY_LOSS:-10}
       - INITIAL_BALANCE=${INITIAL_BALANCE:-350}
       - RISK_PER_TRADE=${RISK_PER_TRADE:-0.02}
