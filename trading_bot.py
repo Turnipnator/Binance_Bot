@@ -398,28 +398,9 @@ class BinanceTradingBot:
 
             # Stop loss handled above (5% from entry)
 
-        # Check strategy-specific exit conditions
-        strategies = self.strategies[symbol]
-
-        # Check momentum exit
-        if 'momentum' in strategies:
-            momentum_strat = strategies['momentum']
-            if momentum_strat.in_position:
-                should_exit, reason = momentum_strat.should_exit_long(latest_data, current_price)
-                if should_exit:
-                    logger.info(f"Momentum exit signal for {symbol}: {reason}")
-                    await self._close_position(symbol, current_price, f"Momentum: {reason}")
-                    return
-
-        # Check mean reversion exit
-        if 'mean_reversion' in strategies:
-            mr_strat = strategies['mean_reversion']
-            if mr_strat.in_position:
-                should_exit, reason = mr_strat.should_exit_long(latest_data, current_price)
-                if should_exit:
-                    logger.info(f"Mean reversion exit signal for {symbol}: {reason}")
-                    await self._close_position(symbol, current_price, f"Mean Reversion: {reason}")
-                    return
+        # Exits are now TP/SL only - no signal-based early exits
+        # Entry filters remain comprehensive (momentum, trend, volume, etc.)
+        # But once in a position, we ride to 1.3% TP or 5% SL
 
     async def _check_entry_signals(self, symbol: str, latest_data: Dict, ta: TechnicalAnalysis):
         """
