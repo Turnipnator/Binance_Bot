@@ -387,9 +387,8 @@ class MomentumStrategy:
 
     def calculate_take_profit(self, entry_price: float, stop_loss: float, risk_reward: float = 3.0) -> float:
         """
-        NO FIXED TAKE PROFIT - Using 5% trailing stop instead!
-        Returns a very high value that will never be hit.
-        The 5% trailing stop will manage all exits.
+        Calculate take profit at 1.3% above entry price.
+        Lock in small gains quickly rather than hoping for big moves.
 
         Args:
             entry_price: Entry price
@@ -397,10 +396,10 @@ class MomentumStrategy:
             risk_reward: Risk-reward ratio (unused, kept for compatibility)
 
         Returns:
-            Very high take profit price (will never be hit)
+            Take profit price (1.3% above entry)
         """
-        # Set TP at 10x entry - will never hit, trailing stop handles exits
-        take_profit = entry_price * 10.0
+        # 1.3% take profit - lock in gains quickly
+        take_profit = entry_price * 1.013
 
         return take_profit
 
