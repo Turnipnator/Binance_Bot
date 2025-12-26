@@ -432,7 +432,7 @@ class BinanceTradingBot:
             if not momentum_strat.in_position:
                 should_enter, confidence, _ = momentum_strat.should_enter_long(latest_data)
 
-                if should_enter and confidence >= 0.65:  # Raised from 0.60 for higher quality entries
+                if should_enter and confidence >= 0.70:  # High conviction entries only
                     signal = momentum_strat.generate_signal(latest_data)
                     if signal:
                         await self._execute_entry(
@@ -452,7 +452,7 @@ class BinanceTradingBot:
             if not mr_strat.in_position:
                 should_enter, confidence, _ = mr_strat.should_enter_long(latest_data)
 
-                if should_enter and confidence > 0.65:
+                if should_enter and confidence > 0.70:
                     signal = mr_strat.generate_signal(latest_data)
                     if signal:
                         await self._execute_entry(
@@ -712,23 +712,8 @@ class BinanceTradingBot:
             await asyncio.sleep(300)  # Update every 5 minutes
 
             try:
-                # Check for stale positions (safety mechanism) - now returns info for notifications
-                stale_positions = self.risk_manager.check_stale_positions()
-
-                # Send Telegram notifications for any stale positions that were closed
-                if stale_positions and self.telegram_bot:
-                    for pos_info in stale_positions:
-                        try:
-                            await self.telegram_bot.notify_trade_closed(
-                                symbol=pos_info['symbol'],
-                                entry_price=pos_info['entry_price'],
-                                exit_price=pos_info['exit_price'],
-                                pnl=pos_info['pnl'],
-                                pnl_pct=pos_info['pnl_pct'],
-                                reason=pos_info['reason']
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to send stale position notification for {pos_info['symbol']}: {e}")
+                # Stale position check disabled - let TP/SL handle exits
+                # Positions ride to 1.3% win or 5% loss, time doesn't matter
 
                 summary = self.risk_manager.get_portfolio_summary()
 
