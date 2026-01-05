@@ -298,8 +298,8 @@ class MomentumStrategy:
         # CRITICAL: Check volume BEFORE entering
         # Require 2x volume surge like breakout strategy - filters false signals
         volume_ratio = technical_data.get('volume_ratio', 1.0)
-        if volume_ratio < 1.0:  # Require normal volume (other filters provide confirmation)
-            logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.0x)")
+        if volume_ratio < 1.5:  # Require normal volume (other filters provide confirmation)
+            logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.5x)")
             return False, momentum_score, momentum_data
 
         # 4H timeframe confirmation DISABLED for testnet (insufficient historical data)
