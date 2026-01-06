@@ -18,6 +18,7 @@ from strategies.grid_strategy import GridTradingStrategy, DynamicGridStrategy
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.mean_reversion_strategy import MeanReversionStrategy
 from telegram_bot import TelegramBot
+from utils.storage_manager import get_storage
 
 
 # Process lock file to prevent multiple instances
@@ -639,6 +640,11 @@ class BinanceTradingBot:
                             symbol, position.entry_price, fill_price,
                             realized_pnl, position.unrealized_pnl_pct, reason
                         )
+
+                    # Save trade to persistent storage
+                    self._save_trade_to_storage(
+                        symbol, position, fill_price, realized_pnl, reason
+                    )
                 else:
                     logger.error(f"Failed to execute exit order for {symbol}")
 
@@ -657,6 +663,11 @@ class BinanceTradingBot:
                             realized_pnl, position.unrealized_pnl_pct, f"{reason} [PAPER]"
                         )
 
+                    # Save trade to persistent storage (paper trading too)
+                    self._save_trade_to_storage(
+                        symbol, position, exit_price, realized_pnl, reason
+                    )
+
             # Update strategy state
             strategies = self.strategies[symbol]
             if 'momentum' in strategies:
@@ -666,6 +677,57 @@ class BinanceTradingBot:
 
         except Exception as e:
             logger.error(f"Error closing position for {symbol}: {e}")
+
+    def _save_trade_to_storage(self, symbol: str, position, exit_price: float,
+                                realized_pnl: float, reason: str):
+        """
+        Save completed trade to persistent storage.
+
+        Args:
+            symbol: Trading pair symbol
+            position: Position object with entry details
+            exit_price: Exit price
+            realized_pnl: Realized P&L in USDT
+            reason: Exit reason string
+        """
+        try:
+            storage = get_storage()
+
+            # Map reason to standard format
+            reason_map = {
+                'take profit': 'take_profit',
+                'stop loss': 'stop_loss',
+                'trailing stop': 'trailing_stop',
+                'emergency stop': 'emergency',
+                'manual': 'manual'
+            }
+            exit_reason = reason_map.get(reason.lower().replace('[paper]', '').strip(), 'manual')
+
+            # Calculate P&L percentage
+            pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+
+            # Build trade record
+            trade = {
+                'pair': symbol,
+                'strategy': 'momentum',
+                'side': 'long',
+                'entry_price': position.entry_price,
+                'exit_price': exit_price,
+                'size': position.quantity,
+                'size_quote': round(position.entry_price * position.quantity, 2),
+                'pnl_usdt': round(realized_pnl, 2),
+                'pnl_percent': round(pnl_pct, 2),
+                'fees_usdt': 0,  # Could be calculated from order if needed
+                'entry_time': datetime.fromtimestamp(position.timestamp).isoformat(),
+                'exit_time': datetime.now().isoformat(),
+                'exit_reason': exit_reason,
+                'is_win': realized_pnl > 0
+            }
+
+            storage.save_trade(trade)
+
+        except Exception as e:
+            logger.error(f"Error saving trade to storage: {e}")
 
     async def _check_daily_limits(self) -> bool:
         """
