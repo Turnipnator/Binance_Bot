@@ -595,27 +595,10 @@ class RiskManager:
 
     def calculate_kelly_factor(self) -> float:
         """
-        Calculate Kelly Criterion for position sizing optimization
-
-        Returns:
-            Kelly factor (capped at 0.20)
+        Kelly factor disabled - strategy is proven, use full position sizing.
+        Volatility adjustment still provides risk scaling.
         """
-        if self.total_trades < 20:
-            return 0.5  # Conservative until we have more data
-
-        win_rate = self.winning_trades / self.total_trades if self.total_trades > 0 else 0.5
-
-        # Assume average win/loss ratios (can be tracked more precisely)
-        avg_win = 0.025  # 2.5% average win
-        avg_loss = 0.015  # 1.5% average loss
-
-        # Kelly formula: win_rate - ((1 - win_rate) / (avg_win / avg_loss))
-        kelly_full = win_rate - ((1 - win_rate) / (avg_win / avg_loss))
-
-        # Use fractional Kelly for safety (50%)
-        kelly_factor = max(0.25, min(kelly_full * 0.5, 0.20))
-
-        return kelly_factor
+        return 1.0
 
     def calculate_portfolio_heat(self) -> float:
         """
