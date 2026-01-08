@@ -464,8 +464,8 @@ class RiskManager:
         available_risk = max_allowed_value - (current_portfolio_risk * self.balance)
         final_position_value = min(adjusted_position_value, available_risk)
 
-        # Also check single position limit (17% max for ~$50 positions)
-        max_single_position = self.balance * 0.17
+        # Also check single position limit (20% max for ~$200 positions)
+        max_single_position = self.balance * 0.20
         final_position_value = min(final_position_value, max_single_position)
 
         # Calculate position size in asset
