@@ -102,31 +102,15 @@ MAX_DAILY_LOSS=10
 
 ## Deployment Workflow
 
-### Standard Deploy (after code changes)
-```bash
-# 1. Commit and push locally
-git add . && git commit -m "message" && git push origin main
+See `CLAUDE.local.md` for VPS connection details and deployment commands.
+This file is gitignored and contains sensitive server information.
 
-# 2. Sync VPS and rebuild
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cd /opt/Binance_Bot && git fetch origin main && git reset --hard origin/main && rm -f data/bot.lock && docker compose down && docker compose build && docker compose up -d"
-```
-
-### Quick Restart (no code changes)
-```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "cd /opt/Binance_Bot && docker compose restart"
-```
-
-### Check Status
-```bash
-# Container health
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps | grep binance"
-
-# Recent logs
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs --tail 50 binance-trading-bot"
-
-# Check for errors
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs binance-trading-bot 2>&1 | grep -i error | tail -10"
-```
+### General Workflow
+1. Make changes locally
+2. Commit and push to GitHub
+3. Sync VPS from GitHub
+4. Rebuild and restart container
+5. Verify container is healthy
 
 ---
 
@@ -224,12 +208,12 @@ The `data/` directory is mounted as a volume - survives container rebuilds.
 
 ---
 
-## Other Bots on Same VPS
+## Other Bots
 
-For reference, these also run on the same Contabo VPS:
-- **Enclave Bot**: /opt/enclave-bot (TypeScript, similar strategy)
-- **Hyperliquid Bot**: /opt/hyperliquid-bot (TypeScript)
-- **Gold Bot**: /opt/Oanda_Gold
+For reference, other bots use similar patterns:
+- **Enclave Bot**: TypeScript, similar strategy, Enclave exchange
+- **Hyperliquid Bot**: TypeScript, wallet signing
+- **Gold Bot**: Oanda forex
 
 Each has its own container and doesn't interfere with others.
 
@@ -239,7 +223,7 @@ Each has its own container and doesn't interfere with others.
 
 ### "Bot already running" error
 ```bash
-rm -f /opt/Binance_Bot/data/bot.lock
+rm -f data/bot.lock
 docker compose restart
 ```
 
