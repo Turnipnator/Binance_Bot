@@ -727,6 +727,206 @@ class TelegramBot:
             logger.error(f"Error in export command: {e}")
             await update.message.reply_text(f"❌ Error: {str(e)}")
 
+    async def explain_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Explain what the bot is doing in plain English.
+        Designed for non-technical users who just want to know what's happening.
+        """
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            today = datetime.now(timezone.utc)
+            today_str = today.strftime("%Y-%m-%d")
+
+            message = "🤖 **WHAT I'M DOING RIGHT NOW**\n\n"
+
+            # Check if bot is running
+            if not self.trading_bot:
+                message += "⚠️ I'm not connected to the trading system.\n"
+                await update.message.reply_text(message, parse_mode='Markdown')
+                return
+
+            if not self.trading_bot.is_running:
+                message += (
+                    "⏸️ I'm currently **PAUSED** and not trading.\n"
+                    "Use /resume to start me again.\n"
+                )
+                await update.message.reply_text(message, parse_mode='Markdown')
+                return
+
+            # Bot is running - explain what it's doing
+            message += "✅ I'm actively **monitoring the markets** for trading opportunities.\n\n"
+
+            # Get positions
+            positions = self.trading_bot.risk_manager.get_all_positions()
+
+            if positions:
+                total_value = sum(p.quantity * p.current_price for p in positions)
+                unrealized = sum(p.unrealized_pnl for p in positions)
+
+                message += f"**Current Positions:**\n"
+                message += f"• I have {len(positions)} open trade(s)\n"
+
+                for pos in positions:
+                    pnl_emoji = "📈" if pos.unrealized_pnl >= 0 else "📉"
+                    message += f"• {pos.symbol}: {pnl_emoji} ${pos.unrealized_pnl:+.2f}\n"
+
+                message += f"\n"
+
+                if unrealized >= 0:
+                    message += f"Overall I'm **up ${unrealized:.2f}** on open positions.\n\n"
+                else:
+                    message += f"Overall I'm **down ${abs(unrealized):.2f}** on open positions, but stops are in place.\n\n"
+            else:
+                message += "**No open positions** - I'm watching for good entry signals.\n\n"
+
+            # What signals I'm looking for
+            message += (
+                "**What I'm looking for:**\n"
+                "• Strong momentum (score ≥ 0.70)\n"
+                "• Bullish trend (EMA stack aligned)\n"
+                "• Good volume (1.5x average)\n"
+                "• RSI in the sweet spot (40-70)\n\n"
+            )
+
+            # Today's activity
+            today_stats = storage.get_daily_stats(today_str)
+            if today_stats and today_stats.get('total_trades', 0) > 0:
+                message += (
+                    f"**Today so far:**\n"
+                    f"• Completed {today_stats['total_trades']} trade(s)\n"
+                    f"• Made ${today_stats['realised_pnl']:.2f}\n"
+                    f"• Win rate: {today_stats['win_rate']}%\n"
+                )
+            else:
+                message += "**Today:** No completed trades yet - waiting for the right setup.\n"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in explain command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def health_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Simple health check with green ticks and recommendations.
+        Designed for quick "is everything OK?" checks.
+        """
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            recommendations = []
+
+            message = "🏥 **BOT HEALTH CHECK**\n\n"
+
+            # 1. Bot Status
+            if self.trading_bot and self.trading_bot.is_running:
+                runtime = datetime.now() - self.trading_bot.start_time if self.trading_bot.start_time else timedelta(0)
+                hours = int(runtime.total_seconds() // 3600)
+                mins = int((runtime.total_seconds() % 3600) // 60)
+                message += f"✅ Bot Status: Running ({hours}h {mins}m)\n"
+            else:
+                message += "❌ Bot Status: Stopped\n"
+                recommendations.append("Use /resume to start the bot")
+
+            # 2. Exchange Connection
+            if self.trading_bot:
+                try:
+                    # Quick balance check to verify connection
+                    self.trading_bot.client.get_account_balance()
+                    message += "✅ Binance Connection: OK\n"
+                except Exception as e:
+                    message += "❌ Binance Connection: Failed\n"
+                    recommendations.append("Check API keys and internet connection")
+            else:
+                message += "⚠️ Binance Connection: Not initialized\n"
+
+            # 3. Balance
+            if self.trading_bot:
+                summary = self.trading_bot.risk_manager.get_portfolio_summary()
+                balance = summary.get('balance', 0)
+                if balance > 100:
+                    message += f"✅ Balance: ${balance:,.2f}\n"
+                elif balance > 0:
+                    message += f"⚠️ Balance: ${balance:,.2f} (low)\n"
+                    recommendations.append("Consider adding funds")
+                else:
+                    message += f"❌ Balance: ${balance:,.2f}\n"
+                    recommendations.append("No trading balance available")
+
+            # 4. Risk Level (Portfolio Heat)
+            if self.trading_bot:
+                heat = summary.get('portfolio_heat', 0) * 100
+                if heat < 10:
+                    message += f"✅ Risk Level: {heat:.1f}% (conservative)\n"
+                elif heat < 15:
+                    message += f"⚠️ Risk Level: {heat:.1f}% (moderate)\n"
+                else:
+                    message += f"🔴 Risk Level: {heat:.1f}% (high)\n"
+                    recommendations.append("Consider reducing position sizes")
+
+            # 5. Open Positions
+            if self.trading_bot:
+                positions = self.trading_bot.risk_manager.get_all_positions()
+                if len(positions) == 0:
+                    message += "✅ Positions: None (watching)\n"
+                elif len(positions) <= 3:
+                    message += f"✅ Positions: {len(positions)} open\n"
+                else:
+                    message += f"⚠️ Positions: {len(positions)} open (many)\n"
+
+            # 6. Today's P&L
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            today_stats = storage.get_daily_stats(today_str)
+
+            if today_stats:
+                pnl = today_stats.get('realised_pnl', 0)
+                if pnl >= 50:
+                    message += f"✅ Today's P&L: +${pnl:.2f} (target reached! 🎯)\n"
+                elif pnl >= 0:
+                    message += f"✅ Today's P&L: +${pnl:.2f}\n"
+                elif pnl > -30:
+                    message += f"⚠️ Today's P&L: -${abs(pnl):.2f}\n"
+                else:
+                    message += f"🔴 Today's P&L: -${abs(pnl):.2f}\n"
+                    recommendations.append("Daily loss limit approaching")
+            else:
+                message += "✅ Today's P&L: $0.00 (no trades)\n"
+
+            # 7. Win Rate (lifetime)
+            lifetime = storage.get_lifetime_stats()
+            win_rate = lifetime.get('win_rate', 0)
+            total_trades = lifetime.get('total_trades', 0)
+
+            if total_trades > 0:
+                if win_rate >= 60:
+                    message += f"✅ Win Rate: {win_rate}% ({total_trades} trades)\n"
+                elif win_rate >= 45:
+                    message += f"⚠️ Win Rate: {win_rate}% ({total_trades} trades)\n"
+                else:
+                    message += f"🔴 Win Rate: {win_rate}% ({total_trades} trades)\n"
+                    recommendations.append("Review strategy performance")
+
+            # Recommendations
+            if recommendations:
+                message += "\n**📋 Recommendations:**\n"
+                for rec in recommendations:
+                    message += f"• {rec}\n"
+            else:
+                message += "\n👍 **Everything looks good!** No action needed."
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in health command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
     async def balance_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /balance command"""
         if not self.is_authorized(update.effective_user.id):
@@ -926,7 +1126,9 @@ class TelegramBot:
             "**📊 Monitoring:**\n"
             "/status - Bot status and summary\n"
             "/positions - View open positions\n"
-            "/balance - Account balance\n\n"
+            "/balance - Account balance\n"
+            "/explain - What am I doing? (plain English)\n"
+            "/health - Quick health check\n\n"
             "**💰 Performance:**\n"
             "/pnl - Today's P&L\n"
             "/pnl weekly - This week's P&L\n"
@@ -941,8 +1143,6 @@ class TelegramBot:
             "/stop - Stop trading (keep positions)\n"
             "/resume - Resume trading\n"
             "/emergency - ⚠️ Close ALL positions\n\n"
-            "**ℹ️ Help:**\n"
-            "/help - Show this message\n\n"
             "**🔔 Notifications:**\n"
             "Automatic alerts for trades, targets, and errors.\n\n"
             f"Your ID: `{update.effective_user.id}`"
@@ -1056,6 +1256,10 @@ class TelegramBot:
             self.app.add_handler(CommandHandler("losers", self.losers_command))
             self.app.add_handler(CommandHandler("stats", self.stats_command))
             self.app.add_handler(CommandHandler("export", self.export_command))
+
+            # User-friendly commands
+            self.app.add_handler(CommandHandler("explain", self.explain_command))
+            self.app.add_handler(CommandHandler("health", self.health_command))
 
             # Add callback handlers
             self.app.add_handler(CallbackQueryHandler(self.pnl_callback, pattern='^pnl_'))
