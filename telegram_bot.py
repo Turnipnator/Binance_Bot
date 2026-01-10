@@ -3,7 +3,9 @@ Telegram Bot Integration for Trading Bot
 Provides remote control and monitoring via Telegram
 """
 import asyncio
-from datetime import datetime, timedelta
+import io
+import csv
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,6 +18,26 @@ from telegram.ext import (
 )
 from loguru import logger
 import json
+
+from utils.storage_manager import get_storage
+
+
+def format_pnl(value: float) -> str:
+    """Format P&L with sign and emoji."""
+    if value >= 0:
+        return f"+${value:.2f} ✅"
+    else:
+        return f"-${abs(value):.2f} 🔻"
+
+
+def format_duration(seconds: int) -> str:
+    """Format duration in human-readable form."""
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    else:
+        hours = seconds // 3600
+        mins = (seconds % 3600) // 60
+        return f"{hours}h {mins}m"
 
 
 class TelegramBot:
@@ -69,14 +91,11 @@ class TelegramBot:
         welcome_message = (
             "🤖 **Binance Trading Bot Control Panel**\n\n"
             "Welcome! You can now control and monitor your trading bot.\n\n"
-            "**Available Commands:**\n"
+            "**Key Commands:**\n"
             "/status - Bot status and summary\n"
-            "/positions - View open positions\n"
-            "/pnl - Profit & Loss report\n"
-            "/balance - Account balance\n"
-            "/stop - Stop trading gracefully\n"
-            "/resume - Resume trading\n"
-            "/emergency - Emergency stop (close all)\n"
+            "/pnl - Today's P&L\n"
+            "/trades - Recent trade history\n"
+            "/stats - Lifetime statistics\n"
             "/help - Show all commands\n\n"
             "📊 Real-time trade notifications enabled!"
         )
@@ -187,31 +206,198 @@ class TelegramBot:
             await update.message.reply_text(f"❌ Error getting positions: {str(e)}")
 
     async def pnl_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /pnl command with time period selection"""
+        """
+        Handle /pnl command with optional period argument.
+
+        Usage:
+            /pnl          - Today's P&L (or show period buttons)
+            /pnl daily    - Today's P&L
+            /pnl weekly   - This week (Mon-Sun)
+            /pnl monthly  - This calendar month
+            /pnl all      - All-time statistics
+        """
         if not self.is_authorized(update.effective_user.id):
             return
 
-        keyboard = [
-            [
-                InlineKeyboardButton("📅 Daily", callback_data='pnl_daily'),
-                InlineKeyboardButton("📊 Weekly", callback_data='pnl_weekly')
-            ],
-            [
-                InlineKeyboardButton("📈 Monthly", callback_data='pnl_monthly'),
-                InlineKeyboardButton("🏆 All Time", callback_data='pnl_alltime')
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        args = context.args
+        storage = get_storage()
+        today = datetime.now(timezone.utc)
 
-        await update.message.reply_text(
-            "📊 **Select Time Period:**",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        # If no arguments, show today's P&L directly (most useful default)
+        if not args:
+            await self._show_daily_pnl(update, storage, today)
+            self.commands_executed += 1
+            return
+
+        period = args[0].lower()
+
+        if period == 'daily':
+            await self._show_daily_pnl(update, storage, today)
+
+        elif period == 'weekly':
+            # This week (Monday to today)
+            start_of_week = today - timedelta(days=today.weekday())
+            stats = storage.get_stats_for_period(
+                start_of_week.strftime("%Y-%m-%d"),
+                today.strftime("%Y-%m-%d")
+            )
+
+            if stats['total_trades'] == 0:
+                message = (
+                    f"📊 **THIS WEEK'S PERFORMANCE**\n"
+                    f"({start_of_week.strftime('%d %b')} - {today.strftime('%d %b %Y')})\n\n"
+                    f"No trades this week yet."
+                )
+            else:
+                message = (
+                    f"📊 **THIS WEEK'S PERFORMANCE**\n"
+                    f"({start_of_week.strftime('%d %b')} - {today.strftime('%d %b %Y')})\n\n"
+                    f"💰 Total P&L: {format_pnl(stats['realised_pnl'])}\n"
+                    f"📊 Trades: {stats['total_trades']} "
+                    f"({stats['wins']}W / {stats['losses']}L)\n"
+                    f"📈 Win Rate: {stats['win_rate']}%\n"
+                    f"📅 Trading Days: {stats['days_count']}"
+                )
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        elif period == 'monthly':
+            # This calendar month
+            start_of_month = today.replace(day=1)
+            stats = storage.get_stats_for_period(
+                start_of_month.strftime("%Y-%m-%d"),
+                today.strftime("%Y-%m-%d")
+            )
+
+            if stats['total_trades'] == 0:
+                message = (
+                    f"📊 **THIS MONTH'S PERFORMANCE**\n"
+                    f"({today.strftime('%B %Y')})\n\n"
+                    f"No trades this month yet."
+                )
+            else:
+                message = (
+                    f"📊 **THIS MONTH'S PERFORMANCE**\n"
+                    f"({today.strftime('%B %Y')})\n\n"
+                    f"💰 Total P&L: {format_pnl(stats['realised_pnl'])}\n"
+                    f"📊 Trades: {stats['total_trades']} "
+                    f"({stats['wins']}W / {stats['losses']}L)\n"
+                    f"📈 Win Rate: {stats['win_rate']}%\n"
+                    f"📅 Trading Days: {stats['days_count']}"
+                )
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        elif period == 'all' or period == 'alltime':
+            # All-time statistics from persistent storage
+            stats = storage.get_lifetime_stats()
+
+            if stats.get('total_trades', 0) == 0:
+                message = (
+                    "🏆 **ALL-TIME PERFORMANCE**\n\n"
+                    "No trade history yet.\n"
+                    "Statistics will appear after your first completed trade."
+                )
+            else:
+                message = (
+                    f"🏆 **ALL-TIME PERFORMANCE**\n\n"
+                    f"📅 Period: {stats.get('first_trade_date', 'N/A')} → {stats.get('last_trade_date', 'N/A')}\n"
+                    f"📆 Trading Days: {stats.get('total_days_trading', 0)}\n"
+                    f"{'─' * 25}\n"
+                    f"💰 Total P&L: {format_pnl(stats.get('total_pnl', 0))}\n"
+                    f"📈 Daily Average: {format_pnl(stats.get('average_daily_pnl', 0))}\n\n"
+                    f"📊 Total Trades: {stats.get('total_trades', 0)}\n"
+                    f"✅ Winners: {stats.get('total_wins', 0)} ({stats.get('win_rate', 0)}%)\n"
+                    f"❌ Losers: {stats.get('total_losses', 0)}\n\n"
+                    f"📈 Avg Win: +${stats.get('average_win', 0):.2f}\n"
+                    f"📉 Avg Loss: -${abs(stats.get('average_loss', 0)):.2f}\n"
+                    f"⚖️ Profit Factor: {stats.get('profit_factor', 0)}"
+                )
+
+                # Add best/worst day
+                if stats.get('best_day'):
+                    message += f"\n\n🏆 Best Day: +${stats['best_day']['pnl']:.2f} ({stats['best_day']['date']})"
+                if stats.get('worst_day') and stats['worst_day']['pnl'] < 0:
+                    message += f"\n😔 Worst Day: -${abs(stats['worst_day']['pnl']):.2f} ({stats['worst_day']['date']})"
+
+                # Add current streak
+                streak = stats.get('current_streak', {})
+                if streak.get('count', 0) >= 2:
+                    emoji = "🔥" if streak['type'] == "win" else "❄️"
+                    message += f"\n\nCurrent Streak: {emoji} {streak['count']} {streak['type']}s"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+
+        else:
+            await update.message.reply_text(
+                "❓ Unknown period. Use:\n"
+                "/pnl - Today\n"
+                "/pnl daily - Today\n"
+                "/pnl weekly - This week\n"
+                "/pnl monthly - This month\n"
+                "/pnl all - All time"
+            )
+
         self.commands_executed += 1
 
+    async def _show_daily_pnl(self, update: Update, storage, today: datetime):
+        """Show today's P&L from persistent storage."""
+        today_str = today.strftime("%Y-%m-%d")
+        stats = storage.get_daily_stats(today_str)
+
+        # Also get unrealized P&L from open positions if available
+        unrealized_pnl = 0
+        open_positions = 0
+        if self.trading_bot:
+            positions = self.trading_bot.risk_manager.get_all_positions()
+            unrealized_pnl = sum(p.unrealized_pnl for p in positions)
+            open_positions = len(positions)
+
+        if not stats or stats.get('total_trades', 0) == 0:
+            message = (
+                f"📊 **TODAY'S PERFORMANCE** ({today.strftime('%d %b %Y')})\n\n"
+                f"No completed trades today yet.\n"
+            )
+            if open_positions > 0:
+                message += f"\n📍 Open Positions: {open_positions}\n"
+                message += f"📈 Unrealized P&L: {format_pnl(unrealized_pnl)}"
+        else:
+            realised = stats.get('realised_pnl', 0)
+            total_pnl = realised + unrealized_pnl
+
+            message = (
+                f"📊 **TODAY'S PERFORMANCE** ({today.strftime('%d %b %Y')})\n\n"
+                f"💰 Realised P&L: {format_pnl(realised)}\n"
+            )
+            if open_positions > 0:
+                message += f"📈 Unrealised P&L: {format_pnl(unrealized_pnl)} ({open_positions} open)\n"
+                message += f"{'─' * 25}\n"
+                message += f"📊 Net P&L: {format_pnl(total_pnl)}\n\n"
+            else:
+                message += "\n"
+
+            message += (
+                f"📊 Trades: {stats['total_trades']} "
+                f"({stats['wins']}W / {stats['losses']}L)\n"
+                f"📈 Win Rate: {stats['win_rate']}%\n"
+            )
+
+            if stats.get('best_trade_pair'):
+                message += f"\n🏆 Best: {stats['best_trade_pair']} +${stats['best_trade_pnl']:.2f}"
+            if stats.get('worst_trade_pair') and stats.get('worst_trade_pnl', 0) < 0:
+                message += f"\n😔 Worst: {stats['worst_trade_pair']} -${abs(stats['worst_trade_pnl']):.2f}"
+
+            # Add streak info from lifetime stats
+            lifetime = storage.get_lifetime_stats()
+            streak = lifetime.get('current_streak', {})
+            if streak.get('count', 0) >= 3:
+                emoji = "🔥" if streak['type'] == "win" else "❄️"
+                message += f"\n\nStreak: {emoji} {streak['count']} {streak['type']}s in a row!"
+
+        await update.message.reply_text(message, parse_mode='Markdown')
+
     async def pnl_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle P&L button callbacks"""
+        """Handle P&L button callbacks (legacy support)"""
         query = update.callback_query
         await query.answer()
 
@@ -220,61 +406,326 @@ class TelegramBot:
 
         try:
             period = query.data.replace('pnl_', '')
-
-            if not self.trading_bot:
-                await query.edit_message_text("⚠️ Trading bot not connected")
-                return
-
-            summary = self.trading_bot.risk_manager.get_portfolio_summary()
-
-            # Calculate period-specific stats (simplified - you'd want to track this in DB)
-            message = ""
+            storage = get_storage()
+            today = datetime.now(timezone.utc)
 
             if period == 'daily':
-                message = (
-                    "📅 **DAILY P&L REPORT**\n\n"
-                    f"💰 Today's P&L: ${summary['daily_pnl']:,.2f}\n"
-                    f"📊 Trades Today: {summary['daily_trades']}\n"
-                    f"✅ Wins: {summary['winning_trades']}\n"
-                    f"❌ Losses: {summary['losing_trades']}\n"
-                    f"📈 Win Rate: {summary['win_rate']:.1f}%\n\n"
+                today_str = today.strftime("%Y-%m-%d")
+                stats = storage.get_daily_stats(today_str)
+
+                if not stats or stats.get('total_trades', 0) == 0:
+                    message = f"📅 **DAILY P&L** ({today.strftime('%d %b')})\n\nNo trades today yet."
+                else:
+                    message = (
+                        f"📅 **DAILY P&L** ({today.strftime('%d %b')})\n\n"
+                        f"💰 P&L: {format_pnl(stats['realised_pnl'])}\n"
+                        f"📊 Trades: {stats['total_trades']} ({stats['wins']}W/{stats['losses']}L)\n"
+                        f"📈 Win Rate: {stats['win_rate']}%"
+                    )
+
+            elif period == 'weekly':
+                start_of_week = today - timedelta(days=today.weekday())
+                stats = storage.get_stats_for_period(
+                    start_of_week.strftime("%Y-%m-%d"),
+                    today.strftime("%Y-%m-%d")
                 )
-                from config import Config
-                progress = (summary['daily_pnl'] / Config.TARGET_DAILY_PROFIT) * 100
-                message += f"🎯 Target Progress: {progress:.0f}%\n"
-                message += f"Target: ${Config.TARGET_DAILY_PROFIT:.2f}\n"
-                message += f"Max Loss: ${Config.MAX_DAILY_LOSS:.2f}"
+                message = (
+                    f"📊 **WEEKLY P&L**\n\n"
+                    f"💰 P&L: {format_pnl(stats['realised_pnl'])}\n"
+                    f"📊 Trades: {stats['total_trades']} ({stats['wins']}W/{stats['losses']}L)\n"
+                    f"📈 Win Rate: {stats['win_rate']}%"
+                )
+
+            elif period == 'monthly':
+                start_of_month = today.replace(day=1)
+                stats = storage.get_stats_for_period(
+                    start_of_month.strftime("%Y-%m-%d"),
+                    today.strftime("%Y-%m-%d")
+                )
+                message = (
+                    f"📈 **MONTHLY P&L**\n\n"
+                    f"💰 P&L: {format_pnl(stats['realised_pnl'])}\n"
+                    f"📊 Trades: {stats['total_trades']} ({stats['wins']}W/{stats['losses']}L)\n"
+                    f"📈 Win Rate: {stats['win_rate']}%"
+                )
 
             elif period == 'alltime':
-                message = (
-                    "🏆 **ALL TIME P&L REPORT**\n\n"
-                    f"💰 Total P&L: ${summary['total_pnl']:,.2f}\n"
-                    f"📈 Return: {summary['total_pnl_pct']:+.2f}%\n"
-                    f"📊 Total Trades: {summary['total_trades']}\n"
-                    f"✅ Winning: {summary['winning_trades']}\n"
-                    f"❌ Losing: {summary['losing_trades']}\n"
-                    f"📈 Win Rate: {summary['win_rate']:.1f}%\n\n"
-                    f"💵 Initial: ${summary['initial_balance']:,.2f}\n"
-                    f"💰 Current: ${summary['balance']:,.2f}\n"
-                    f"📊 Portfolio: ${summary['portfolio_value']:,.2f}"
-                )
-
+                stats = storage.get_lifetime_stats()
+                if stats.get('total_trades', 0) == 0:
+                    message = "🏆 **ALL-TIME P&L**\n\nNo trade history yet."
+                else:
+                    message = (
+                        f"🏆 **ALL-TIME P&L**\n\n"
+                        f"💰 Total P&L: {format_pnl(stats.get('total_pnl', 0))}\n"
+                        f"📊 Trades: {stats.get('total_trades', 0)} "
+                        f"({stats.get('total_wins', 0)}W/{stats.get('total_losses', 0)}L)\n"
+                        f"📈 Win Rate: {stats.get('win_rate', 0)}%\n"
+                        f"⚖️ Profit Factor: {stats.get('profit_factor', 0)}"
+                    )
             else:
-                # Weekly/Monthly would require historical tracking
-                message = (
-                    f"📊 **{period.upper()} P&L REPORT**\n\n"
-                    f"⚠️ Historical tracking not yet implemented.\n"
-                    f"Current session stats:\n\n"
-                    f"💰 P&L: ${summary['total_pnl']:,.2f}\n"
-                    f"📊 Trades: {summary['total_trades']}\n"
-                    f"📈 Win Rate: {summary['win_rate']:.1f}%"
-                )
+                message = "Unknown period"
 
             await query.edit_message_text(message, parse_mode='Markdown')
 
         except Exception as e:
             logger.error(f"Error in P&L callback: {e}")
             await query.edit_message_text(f"❌ Error: {str(e)}")
+
+    async def trades_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Show recent trade history.
+
+        Usage:
+            /trades      - Last 10 trades
+            /trades 25   - Last 25 trades
+            /trades today - Today's trades only
+        """
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            args = context.args
+
+            if args and args[0].lower() == "today":
+                trades = storage.get_trades_for_day(
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                )
+                title = "TODAY'S TRADES"
+            else:
+                limit = int(args[0]) if args and args[0].isdigit() else 10
+                limit = min(limit, 50)  # Cap at 50
+                trades = storage.get_trades(limit=limit)
+                title = f"LAST {len(trades)} TRADES"
+
+            if not trades:
+                await update.message.reply_text("📜 No trade history found.")
+                return
+
+            message = f"📜 **{title}**\n\n"
+
+            for trade in trades:
+                emoji = "✅" if trade.get('is_win', False) else "❌"
+                pnl = trade.get('net_pnl_usdt', trade.get('pnl_usdt', 0))
+                pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+                duration = format_duration(trade.get('duration_seconds', 0))
+                pnl_pct = trade.get('pnl_percent', 0)
+
+                message += (
+                    f"{emoji} {trade.get('pair', '?')} | {pnl_str} ({pnl_pct:+.1f}%) | {duration}\n"
+                )
+
+            # Summary
+            wins = sum(1 for t in trades if t.get('is_win', False))
+            total_pnl = sum(t.get('net_pnl_usdt', 0) for t in trades)
+
+            message += (
+                f"\n{'─' * 30}\n"
+                f"**Summary:** {wins}W/{len(trades)-wins}L | "
+                f"Total: {format_pnl(total_pnl)}"
+            )
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in trades command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def winners_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show last 10 winning trades."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            trades = storage.get_winning_trades(limit=10)
+
+            if not trades:
+                await update.message.reply_text("🏆 No winning trades yet! Keep at it! 💪")
+                return
+
+            message = "🏆 **LAST 10 WINNERS**\n\n"
+
+            for trade in trades:
+                pnl = trade.get('net_pnl_usdt', 0)
+                pnl_pct = trade.get('pnl_percent', 0)
+                date = trade.get('exit_time', '')[:10]
+                duration = format_duration(trade.get('duration_seconds', 0))
+
+                message += (
+                    f"✅ {trade.get('pair', '?')} | +${pnl:.2f} (+{pnl_pct:.1f}%) | {duration} | {date}\n"
+                )
+
+            avg_win = sum(t.get('net_pnl_usdt', 0) for t in trades) / len(trades)
+            message += f"\n**Average Win:** +${avg_win:.2f}"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in winners command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def losers_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show last 10 losing trades."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            trades = storage.get_losing_trades(limit=10)
+
+            if not trades:
+                await update.message.reply_text("🎉 No losing trades! Perfect record! 🚀")
+                return
+
+            message = "📉 **LAST 10 LOSSES**\n\n"
+
+            for trade in trades:
+                pnl = trade.get('net_pnl_usdt', 0)
+                pnl_pct = trade.get('pnl_percent', 0)
+                date = trade.get('exit_time', '')[:10]
+                reason = trade.get('exit_reason', 'unknown').replace('_', ' ').title()
+
+                message += (
+                    f"❌ {trade.get('pair', '?')} | -${abs(pnl):.2f} ({pnl_pct:.1f}%) | {reason} | {date}\n"
+                )
+
+            avg_loss = sum(t.get('net_pnl_usdt', 0) for t in trades) / len(trades)
+            message += f"\n**Average Loss:** -${abs(avg_loss):.2f}"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in losers command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show comprehensive lifetime statistics."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            stats = storage.get_lifetime_stats()
+
+            if stats.get('total_trades', 0) == 0:
+                await update.message.reply_text(
+                    "📈 **LIFETIME STATISTICS**\n\n"
+                    "No trade history yet.\n"
+                    "Complete your first trade to see statistics."
+                )
+                return
+
+            message = (
+                f"📈 **LIFETIME STATISTICS**\n\n"
+                f"**📅 Period**\n"
+                f"{stats.get('first_trade_date', 'N/A')} → {stats.get('last_trade_date', 'N/A')}\n"
+                f"Trading days: {stats.get('total_days_trading', 0)}\n\n"
+                f"**💰 Performance**\n"
+                f"Total P&L: {format_pnl(stats.get('total_pnl', 0))}\n"
+                f"Daily Avg: {format_pnl(stats.get('average_daily_pnl', 0))}\n"
+                f"Profit Factor: {stats.get('profit_factor', 0)}\n\n"
+                f"**📊 Trade Stats**\n"
+                f"Total: {stats.get('total_trades', 0)} "
+                f"({stats.get('total_wins', 0)}W / {stats.get('total_losses', 0)}L)\n"
+                f"Win Rate: {stats.get('win_rate', 0)}%\n"
+                f"Avg Win: +${stats.get('average_win', 0):.2f}\n"
+                f"Avg Loss: -${abs(stats.get('average_loss', 0)):.2f}\n\n"
+                f"**🏆 Records**\n"
+            )
+
+            if stats.get('largest_win'):
+                message += (
+                    f"Best Trade: +${stats['largest_win']['pnl']:.2f} "
+                    f"({stats['largest_win']['pair']})\n"
+                )
+            if stats.get('largest_loss') and stats['largest_loss']['pnl'] < 0:
+                message += (
+                    f"Worst Trade: -${abs(stats['largest_loss']['pnl']):.2f} "
+                    f"({stats['largest_loss']['pair']})\n"
+                )
+            if stats.get('best_day'):
+                message += f"Best Day: +${stats['best_day']['pnl']:.2f} ({stats['best_day']['date']})\n"
+            if stats.get('worst_day') and stats['worst_day']['pnl'] < 0:
+                message += f"Worst Day: -${abs(stats['worst_day']['pnl']):.2f} ({stats['worst_day']['date']})\n"
+
+            message += f"Best Win Streak: {stats.get('best_win_streak', 0)}\n"
+
+            # Current streak
+            streak = stats.get('current_streak', {})
+            if streak.get('count', 0) >= 2:
+                emoji = "🔥" if streak['type'] == "win" else "❄️"
+                message += f"\nCurrent: {emoji} {streak['count']} {streak['type']}s"
+
+            await update.message.reply_text(message, parse_mode='Markdown')
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in stats command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+
+    async def export_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Export trade history as CSV file."""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        try:
+            storage = get_storage()
+            trades = storage.get_trades()
+
+            if not trades:
+                await update.message.reply_text("📊 No trade history to export.")
+                return
+
+            # Create CSV content
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Header
+            writer.writerow([
+                'ID', 'Pair', 'Side', 'Entry Price', 'Exit Price',
+                'Size', 'P&L ($)', 'P&L (%)', 'Fees', 'Net P&L',
+                'Entry Time', 'Exit Time', 'Duration', 'Exit Reason', 'Win'
+            ])
+
+            # Data
+            for trade in trades:
+                duration_mins = trade.get('duration_seconds', 0) // 60
+                writer.writerow([
+                    trade.get('id', ''),
+                    trade.get('pair', ''),
+                    trade.get('side', ''),
+                    trade.get('entry_price', 0),
+                    trade.get('exit_price', 0),
+                    trade.get('size', 0),
+                    trade.get('pnl_usdt', 0),
+                    trade.get('pnl_percent', 0),
+                    trade.get('fees_usdt', 0),
+                    trade.get('net_pnl_usdt', 0),
+                    trade.get('entry_time', ''),
+                    trade.get('exit_time', ''),
+                    f"{duration_mins}m",
+                    trade.get('exit_reason', ''),
+                    'Yes' if trade.get('is_win') else 'No'
+                ])
+
+            # Send file
+            output.seek(0)
+            filename = f"trades_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            await update.message.reply_document(
+                document=io.BytesIO(output.getvalue().encode()),
+                filename=filename,
+                caption=f"📊 Exported {len(trades)} trades"
+            )
+            self.commands_executed += 1
+
+        except Exception as e:
+            logger.error(f"Error in export command: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
 
     async def balance_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /balance command"""
@@ -472,24 +923,28 @@ class TelegramBot:
 
         help_text = (
             "🤖 **TRADING BOT COMMANDS**\n\n"
-            "**Monitoring:**\n"
+            "**📊 Monitoring:**\n"
             "/status - Bot status and summary\n"
             "/positions - View open positions\n"
-            "/pnl - P&L reports (daily/weekly/monthly/all-time)\n"
             "/balance - Account balance\n\n"
-            "**Control:**\n"
+            "**💰 Performance:**\n"
+            "/pnl - Today's P&L\n"
+            "/pnl weekly - This week's P&L\n"
+            "/pnl monthly - This month's P&L\n"
+            "/pnl all - All-time performance\n"
+            "/trades - Recent trade history\n"
+            "/winners - Last 10 winning trades\n"
+            "/losers - Last 10 losing trades\n"
+            "/stats - Comprehensive statistics\n"
+            "/export - Download trades as CSV\n\n"
+            "**🎮 Control:**\n"
             "/stop - Stop trading (keep positions)\n"
             "/resume - Resume trading\n"
-            "/emergency - Emergency stop (close all)\n\n"
-            "**Other:**\n"
-            "/help - Show this help message\n\n"
-            "**Notifications:**\n"
-            "You'll receive automatic notifications for:\n"
-            "• Trades opened/closed\n"
-            "• Daily targets reached\n"
-            "• Important alerts\n\n"
-            "**Security:**\n"
-            "Only authorized users can control this bot.\n"
+            "/emergency - ⚠️ Close ALL positions\n\n"
+            "**ℹ️ Help:**\n"
+            "/help - Show this message\n\n"
+            "**🔔 Notifications:**\n"
+            "Automatic alerts for trades, targets, and errors.\n\n"
             f"Your ID: `{update.effective_user.id}`"
         )
 
@@ -594,6 +1049,13 @@ class TelegramBot:
             self.app.add_handler(CommandHandler("resume", self.resume_command))
             self.app.add_handler(CommandHandler("emergency", self.emergency_command))
             self.app.add_handler(CommandHandler("help", self.help_command))
+
+            # Phase 2: Trade history and statistics commands
+            self.app.add_handler(CommandHandler("trades", self.trades_command))
+            self.app.add_handler(CommandHandler("winners", self.winners_command))
+            self.app.add_handler(CommandHandler("losers", self.losers_command))
+            self.app.add_handler(CommandHandler("stats", self.stats_command))
+            self.app.add_handler(CommandHandler("export", self.export_command))
 
             # Add callback handlers
             self.app.add_handler(CallbackQueryHandler(self.pnl_callback, pattern='^pnl_'))
