@@ -132,9 +132,9 @@ class TradeSimulator:
 
         # Bollinger Bands
         bbands = ta.bbands(df['close'], length=20, std=2)
-        df['bb_upper'] = bbands['BBU_20_2.0']
-        df['bb_lower'] = bbands['BBL_20_2.0']
-        df['bb_middle'] = bbands['BBM_20_2.0']
+        df['bb_upper'] = bbands['BBU_20_2.0_2.0']
+        df['bb_lower'] = bbands['BBL_20_2.0_2.0']
+        df['bb_middle'] = bbands['BBM_20_2.0_2.0']
 
         # Trend classification
         df['trend'] = 'sideways'
