@@ -382,26 +382,25 @@ class BinanceTradingBot:
                 self._stop_loss_confirmations[symbol] = 0
 
         # SIMPLE TP/SL SYSTEM:
-        # Take Profit: 1.3% - lock in gains quickly, re-enter if still bullish
-        # Stop Loss: 5% - handled above
+        # Take Profit: per-symbol (default 1.3%, meme coins may use 2%)
+        # Stop Loss: per-symbol (default 5%, meme coins may use 3%)
 
-        TAKE_PROFIT_PCT = 1.3  # 1.3% take profit
+        take_profit_pct = Config.get_take_profit_pct(symbol)
 
         if position.side == 'BUY':
             current_profit_pct = ((current_price - position.entry_price) / position.entry_price) * 100
 
-            # Take profit at 1.3%
-            if current_profit_pct >= TAKE_PROFIT_PCT:
-                take_profit_price = position.entry_price * (1 + TAKE_PROFIT_PCT / 100)
-                logger.info(f"🎯 Take profit hit for {symbol} - exiting at ${take_profit_price:.2f} (+{TAKE_PROFIT_PCT}%)")
+            # Take profit check
+            if current_profit_pct >= take_profit_pct:
+                take_profit_price = position.entry_price * (1 + take_profit_pct / 100)
+                logger.info(f"🎯 Take profit hit for {symbol} - exiting at ${take_profit_price:.2f} (+{take_profit_pct}%)")
                 await self._close_position(symbol, take_profit_price, "Take profit")
                 return
 
-            # Stop loss handled above (5% from entry)
+            # Stop loss handled above (per-symbol %)
 
         # Exits are now TP/SL only - no signal-based early exits
         # Entry filters remain comprehensive (momentum, trend, volume, etc.)
-        # But once in a position, we ride to 1.3% TP or 5% SL
 
     async def _check_entry_signals(self, symbol: str, latest_data: Dict, ta: TechnicalAnalysis):
         """

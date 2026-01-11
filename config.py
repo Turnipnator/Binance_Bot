@@ -3,11 +3,36 @@ Configuration Management for Binance Trading Bot
 Loads and validates all configuration from environment variables
 """
 import os
-from typing import List
+from typing import List, Dict, Tuple, Optional
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+def parse_symbol_overrides(config_str: str) -> Dict[str, Tuple[float, float]]:
+    """
+    Parse per-symbol override configuration.
+    Format: SYMBOL:SL%:TP%,SYMBOL:SL%:TP%
+    Example: SHIBUSDT:3:2,BONKUSDT:3:2
+
+    Returns: Dict mapping symbol to (stop_loss_pct, take_profit_pct)
+    """
+    overrides = {}
+    if not config_str or config_str.strip() == '':
+        return overrides
+
+    for pair in config_str.split(','):
+        parts = pair.strip().split(':')
+        if len(parts) == 3:
+            symbol = parts[0].strip().upper()
+            try:
+                sl_pct = float(parts[1])
+                tp_pct = float(parts[2])
+                overrides[symbol] = (sl_pct, tp_pct)
+            except ValueError:
+                continue
+    return overrides
 
 
 class Config:
@@ -112,6 +137,30 @@ class Config:
 
     # Discord (alternative to Telegram)
     DISCORD_WEBHOOK = os.getenv('DISCORD_WEBHOOK', '')
+
+    # Per-symbol overrides for meme coins (tighter stops)
+    # Format: SHIBUSDT:3:2,BONKUSDT:3:2 (symbol:SL%:TP%)
+    SYMBOL_OVERRIDES = parse_symbol_overrides(os.getenv('MEME_COINS_CONFIG', ''))
+
+    # Default stop loss and take profit (used when no override exists)
+    DEFAULT_STOP_LOSS_PCT = 5.0   # 5% stop loss
+    DEFAULT_TAKE_PROFIT_PCT = 1.3  # 1.3% take profit
+
+    @classmethod
+    def get_stop_loss_pct(cls, symbol: str) -> float:
+        """Get stop loss percentage for a symbol (checks overrides first)"""
+        if symbol in cls.SYMBOL_OVERRIDES:
+            sl_pct, _ = cls.SYMBOL_OVERRIDES[symbol]
+            return sl_pct
+        return cls.DEFAULT_STOP_LOSS_PCT
+
+    @classmethod
+    def get_take_profit_pct(cls, symbol: str) -> float:
+        """Get take profit percentage for a symbol (checks overrides first)"""
+        if symbol in cls.SYMBOL_OVERRIDES:
+            _, tp_pct = cls.SYMBOL_OVERRIDES[symbol]
+            return tp_pct
+        return cls.DEFAULT_TAKE_PROFIT_PCT
 
     @classmethod
     def validate(cls) -> bool:

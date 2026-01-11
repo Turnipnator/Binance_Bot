@@ -482,31 +482,38 @@ class RiskManager:
         self,
         entry_price: float,
         atr: float,
-        position_type: str = 'long'
+        position_type: str = 'long',
+        symbol: str = None
     ) -> float:
         """
-        Calculate FIXED 5% stop loss from entry
+        Calculate stop loss from entry (per-symbol overrides supported)
 
-        NOTE: Changed from ATR-based to fixed 5% to ensure consistent risk per trade.
-        The 5% trailing stop will then maintain this distance as price moves in profit.
+        NOTE: Uses per-symbol overrides for meme coins (e.g., 3% for SHIB/BONK),
+        otherwise defaults to 5% for standard pairs.
 
         Args:
             entry_price: Entry price
             atr: Average True Range (not used, kept for compatibility)
             position_type: 'long' or 'short'
+            symbol: Trading pair symbol (optional, for per-symbol overrides)
 
         Returns:
             Stop loss price
         """
-        # Fixed 5% stop loss for all trades
-        FIXED_STOP_PERCENT = 0.05  # 5%
+        from config import Config
+
+        # Get stop loss percentage (checks per-symbol overrides)
+        if symbol:
+            stop_pct = Config.get_stop_loss_pct(symbol) / 100.0
+        else:
+            stop_pct = Config.DEFAULT_STOP_LOSS_PCT / 100.0
 
         if position_type == 'long':
-            stop_loss = entry_price * (1 - FIXED_STOP_PERCENT)
+            stop_loss = entry_price * (1 - stop_pct)
         else:
-            stop_loss = entry_price * (1 + FIXED_STOP_PERCENT)
+            stop_loss = entry_price * (1 + stop_pct)
 
-        logger.debug(f"Fixed 5% stop loss calculated: {stop_loss:.8f} (entry: {entry_price:.8f}, -{FIXED_STOP_PERCENT*100}%)")
+        logger.debug(f"Stop loss calculated for {symbol or 'default'}: {stop_loss:.8f} (entry: {entry_price:.8f}, -{stop_pct*100}%)")
 
         return stop_loss
 

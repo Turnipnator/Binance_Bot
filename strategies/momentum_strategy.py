@@ -371,10 +371,10 @@ class MomentumStrategy:
         Returns:
             Stop loss price
         """
-        # Use risk manager's FIXED 5% stop loss for consistency
+        # Use risk manager's stop loss (per-symbol for meme coins)
         if self.risk_manager:
-            stop_loss = self.risk_manager.calculate_atr_stop_loss(entry_price, atr, 'long')
-            logger.debug(f"Using fixed 5% stop from risk manager: {stop_loss:.8f}")
+            stop_loss = self.risk_manager.calculate_atr_stop_loss(entry_price, atr, 'long', symbol=self.symbol)
+            logger.debug(f"Using per-symbol stop from risk manager: {stop_loss:.8f}")
             return stop_loss
 
         # Fallback to ATR-based stop (shouldn't happen in production)
