@@ -221,8 +221,13 @@ Each has its own container and doesn't interfere with others.
 
 ## Troubleshooting
 
-### "Bot already running" error
+### "Bot already running" error (COMMON)
+This happens frequently after container rebuilds. **Always clear the lock file when redeploying:**
 ```bash
+# On VPS - standard redeploy with lock file cleanup:
+cd /opt/Binance_Bot && docker compose down && rm -f data/bot.lock && docker compose up -d
+
+# If container is already running but showing lock errors:
 rm -f data/bot.lock
 docker compose restart
 ```
