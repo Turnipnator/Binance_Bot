@@ -302,8 +302,8 @@ class MomentumStrategy:
         if volume_ratio < 1.5:
             logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.5x)")
             return False, momentum_score, momentum_data
-        if vol_min3 < 1.0:
-            logger.debug(f"Isolated volume spike detected: vol_min3={vol_min3:.2f}x (need >= 1.0x sustained)")
+        if vol_min3 < 1.5:
+            logger.debug(f"Insufficient sustained volume: vol_min3={vol_min3:.2f}x (need >= 1.5x sustained)")
             return False, momentum_score, momentum_data
 
         # 4H timeframe confirmation DISABLED for testnet (insufficient historical data)
