@@ -296,10 +296,14 @@ class MomentumStrategy:
             return False, momentum_score, momentum_data
 
         # CRITICAL: Check volume BEFORE entering
-        # Require 2x volume surge like breakout strategy - filters false signals
+        # Require 1.5x volume surge AND sustained volume over last 3 candles
         volume_ratio = technical_data.get('volume_ratio', 1.0)
-        if volume_ratio < 1.5:  # Require normal volume (other filters provide confirmation)
+        vol_min3 = technical_data.get('vol_min3', 0.0)
+        if volume_ratio < 1.5:
             logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.5x)")
+            return False, momentum_score, momentum_data
+        if vol_min3 < 1.0:
+            logger.debug(f"Isolated volume spike detected: vol_min3={vol_min3:.2f}x (need >= 1.0x sustained)")
             return False, momentum_score, momentum_data
 
         # 4H timeframe confirmation DISABLED for testnet (insufficient historical data)
@@ -311,7 +315,7 @@ class MomentumStrategy:
 
         # All conditions met
         confidence = momentum_score
-        logger.info(f"✅ Momentum entry signal: score={momentum_score:.2f}, confidence={confidence:.2f}, volume={volume_ratio:.2f}x")
+        logger.info(f"✅ Momentum entry signal: score={momentum_score:.2f}, confidence={confidence:.2f}, volume={volume_ratio:.2f}x, vol_min3={vol_min3:.2f}x")
 
         return True, confidence, momentum_data
 

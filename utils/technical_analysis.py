@@ -150,6 +150,9 @@ class TechnicalAnalysis:
         # Volume ratio
         self.df['volume_ratio'] = self.df['volume'] / self.df['volume_sma']
 
+        # Minimum volume ratio over last 3 candles (for sustained volume check)
+        self.df['vol_min3'] = self.df['volume_ratio'].rolling(3).min()
+
         # VWAP (Volume Weighted Average Price)
         self.df['vwap'] = ta.vwap(
             self.df['high'],
@@ -408,6 +411,7 @@ class TechnicalAnalysis:
             'atr': safe_float(latest['atr']),
             'atr_pct': safe_float(latest['atr_pct']),
             'volume_ratio': safe_float(latest['volume_ratio']),
+            'vol_min3': safe_float(latest['vol_min3']),
             'vwap': safe_float(latest['vwap']),
             'stoch_k': safe_float(latest['stoch_k']),
             'stoch_d': safe_float(latest['stoch_d'])
