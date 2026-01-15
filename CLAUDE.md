@@ -2,7 +2,7 @@
 
 ## CRITICAL RULES
 
-1. **DO NOT modify the trading strategy** - It has a 100% win rate. The momentum threshold (0.70), TP (1.3%), SL (5%), and LONG-only approach are proven and must not be changed unless explicitly requested.
+1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), TP (1.3%), SL (5%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
 
 2. **Always backup before significant changes** - Use the backup commands in CLAUDE.local.md before modifying core logic.
 
@@ -15,8 +15,8 @@
 This is a cryptocurrency trading bot for Binance Spot trading. It uses a momentum-based strategy with strict risk management.
 
 ### Key Stats
-- **Win Rate**: 100% (24+ consecutive wins)
-- **Strategy**: Momentum with EMA stack confirmation
+- **Win Rate**: ~80% (backtest verified)
+- **Strategy**: Momentum with EMA stack + sustained volume filter
 - **Direction**: LONG only (shorts disabled - crypto has bullish bias)
 
 ---
@@ -54,7 +54,8 @@ Binance_Bot/
 ### Entry Criteria
 - EMA Stack: Bullish trend (EMA 8 > 21 > 50)
 - Momentum Score: >= 0.70
-- Volume: >= 1.5x average
+- Volume: >= 1.5x average (current candle)
+- Sustained Volume: >= 1.5x average (minimum of last 3 candles)
 - RSI: 40-70 range (not overbought/oversold)
 
 ### Exit Criteria
@@ -95,7 +96,8 @@ MAX_DAILY_LOSS=10
 
 ### Key Config Values in Code
 - `MOMENTUM_THRESHOLD = 0.70` (in momentum_strategy.py)
-- `volume_ratio < 1.5` (in momentum_strategy.py)
+- `volume_ratio < 1.5` - current candle volume filter (in momentum_strategy.py)
+- `vol_min3 < 1.5` - sustained volume filter, min of last 3 candles (in momentum_strategy.py)
 - `max_single_position = self.balance * 0.20` (in risk_manager.py)
 
 ---
