@@ -24,31 +24,58 @@ from utils.storage_manager import get_storage
 # Process lock file to prevent multiple instances
 LOCK_FILE = './data/bot.lock'
 
+# Generate unique instance ID at startup (changes every time bot starts)
+import uuid
+INSTANCE_ID = str(uuid.uuid4())[:8]
+
 
 def acquire_lock():
     """
-    Acquire process lock to prevent multiple bot instances
+    Acquire process lock to prevent multiple bot instances.
+
+    Uses a unique instance ID to detect stale locks from previous runs.
+    This fixes the Docker issue where PID 1 always exists in new containers.
 
     Raises:
         Exception if another bot instance is already running
     """
     if os.path.exists(LOCK_FILE):
-        # Check if the PID in lock file is still running
         try:
             with open(LOCK_FILE, 'r') as f:
-                pid = int(f.read().strip())
+                content = f.read().strip()
 
-            # Check if process is still running
-            try:
-                os.kill(pid, 0)  # Signal 0 just checks if process exists
-                raise Exception(
-                    f"Bot already running! PID {pid} is still active.\n"
-                    f"If you're sure no bot is running, delete the lock file: {LOCK_FILE}"
-                )
-            except OSError:
-                # Process doesn't exist, lock file is stale
-                logger.warning(f"Removing stale lock file (PID {pid} not running)")
+            # Parse lock file (format: "PID:INSTANCE_ID")
+            if ':' in content:
+                pid_str, stored_instance_id = content.split(':', 1)
+                pid = int(pid_str)
+            else:
+                # Old format (just PID) - treat as stale
+                logger.warning("Old lock file format detected, removing")
                 os.remove(LOCK_FILE)
+                pid = None
+                stored_instance_id = None
+
+            if pid is not None:
+                # Check if process is still running AND it's the same instance
+                try:
+                    os.kill(pid, 0)  # Signal 0 just checks if process exists
+
+                    # PID exists - but is it from THIS instance or a stale container?
+                    # In Docker, PID 1 always exists, so we need the instance ID check
+                    if stored_instance_id == INSTANCE_ID:
+                        # Same instance trying to acquire twice (shouldn't happen)
+                        raise Exception(
+                            f"Bot already running! PID {pid} (instance {stored_instance_id}) is still active.\n"
+                            f"If you're sure no bot is running, delete the lock file: {LOCK_FILE}"
+                        )
+                    else:
+                        # Different instance - this is a stale lock from old container
+                        logger.warning(f"Removing stale lock file (old instance {stored_instance_id}, new instance {INSTANCE_ID})")
+                        os.remove(LOCK_FILE)
+                except OSError:
+                    # Process doesn't exist, lock file is stale
+                    logger.warning(f"Removing stale lock file (PID {pid} not running)")
+                    os.remove(LOCK_FILE)
         except Exception as e:
             if "Bot already running" in str(e):
                 raise
@@ -56,12 +83,12 @@ def acquire_lock():
             if os.path.exists(LOCK_FILE):
                 os.remove(LOCK_FILE)
 
-    # Create lock file
+    # Create lock file with PID and unique instance ID
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     with open(LOCK_FILE, 'w') as f:
-        f.write(str(os.getpid()))
+        f.write(f"{os.getpid()}:{INSTANCE_ID}")
 
-    logger.info(f"Process lock acquired (PID: {os.getpid()})")
+    logger.info(f"Process lock acquired (PID: {os.getpid()}, instance: {INSTANCE_ID})")
 
 
 def release_lock():
