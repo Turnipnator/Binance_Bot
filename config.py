@@ -143,7 +143,7 @@ class Config:
     SYMBOL_OVERRIDES = parse_symbol_overrides(os.getenv('MEME_COINS_CONFIG', ''))
 
     # Default stop loss and take profit (used when no override exists)
-    DEFAULT_STOP_LOSS_PCT = 5.0   # 5% stop loss
+    DEFAULT_STOP_LOSS_PCT = 3.0   # 3% stop loss
     DEFAULT_TAKE_PROFIT_PCT = 1.3  # 1.3% take profit
 
     @classmethod

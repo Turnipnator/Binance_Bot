@@ -408,26 +408,32 @@ class BinanceTradingBot:
                     logger.info(f"✅ {symbol} price recovered to ${current_price:.2f} - stop loss NOT triggered (was bad data)")
                 self._stop_loss_confirmations[symbol] = 0
 
-        # SIMPLE TP/SL SYSTEM:
-        # Take Profit: per-symbol (default 1.3%, meme coins may use 2%)
-        # Stop Loss: per-symbol (default 5%, meme coins may use 3%)
+        # TRAILING TP/SL SYSTEM:
+        # Phase 1: Wait for price to reach initial TP level (default 1.3%)
+        # Phase 2: Once TP hit, trail with 1% stop from highest price (let winners run)
+        # Stop Loss: per-symbol (default 3%, meme coins may use custom)
 
         take_profit_pct = Config.get_take_profit_pct(symbol)
+        TRAILING_STOP_AFTER_TP = 1.0  # 1% trailing stop after TP is hit
 
         if position.side == 'BUY':
             current_profit_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+            tp_level = position.entry_price * (1 + take_profit_pct / 100)
 
-            # Take profit check
-            if current_profit_pct >= take_profit_pct:
-                take_profit_price = position.entry_price * (1 + take_profit_pct / 100)
-                logger.info(f"🎯 Take profit hit for {symbol} - exiting at ${take_profit_price:.2f} (+{take_profit_pct}%)")
-                await self._close_position(symbol, take_profit_price, "Take profit")
-                return
+            # Check if we've ever reached the TP level (using highest_price tracker)
+            if position.highest_price >= tp_level:
+                # Phase 2: TP was hit - now trailing with tight stop from highest
+                trail_stop = position.highest_price * (1 - TRAILING_STOP_AFTER_TP / 100)
+
+                if current_price <= trail_stop:
+                    exit_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+                    logger.info(f"🎯 Trailing TP exit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f}, +{exit_pnl_pct:.2f}%)")
+                    await self._close_position(symbol, current_price, "Trailing take profit")
+                    return
+                else:
+                    logger.debug(f"{symbol} trailing: price=${current_price:.2f}, high=${position.highest_price:.2f}, trail_stop=${trail_stop:.2f}")
 
             # Stop loss handled above (per-symbol %)
-
-        # Exits are now TP/SL only - no signal-based early exits
-        # Entry filters remain comprehensive (momentum, trend, volume, etc.)
 
     async def _check_entry_signals(self, symbol: str, latest_data: Dict, ta: TechnicalAnalysis):
         """
@@ -557,7 +563,7 @@ class BinanceTradingBot:
                 f"Strategy: {strategy_name}\n"
                 f"Entry: ${entry_price:.2f}\n"
                 f"Stop Loss: ${stop_loss:.2f} ({((stop_loss-entry_price)/entry_price*100):.2f}%)\n"
-                f"Exit Strategy: 5% Trailing Stop (No fixed TP - let winners run!)\n"
+                f"Exit Strategy: 3% SL / trailing after {Config.get_take_profit_pct(symbol)}% TP\n"
                 f"Position Size: {position_size:.6f} ({symbol.replace('USDT', '')})\n"
                 f"Position Value: ${position_value:.2f}\n"
                 f"Risk: ${risk_amount:.2f}\n"

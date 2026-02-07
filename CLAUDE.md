@@ -6,7 +6,7 @@
 
 ## CRITICAL RULES
 
-1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), TP (1.3%), SL (5%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
+1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), trailing TP (after 1.3%), SL (3%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
 
 2. **Always backup before significant changes** - Use the backup commands in CLAUDE.local.md before modifying core logic.
 
@@ -63,9 +63,9 @@ Binance_Bot/
 - RSI: 40-70 range (not overbought/oversold)
 
 ### Exit Criteria
-- Take Profit: 1.3% gain
-- Stop Loss: 5% trailing stop
-- Tracks highest price and trails down
+- Stop Loss: 3% from entry (default, meme coins may differ)
+- Take Profit: Trailing after 1.3% - once price reaches +1.3%, trails with 1% stop from highest
+- Lets winners run beyond 1.3% on strong trends
 
 ### Position Sizing
 - Max single position: 20% of balance (~$200 with current balance)
@@ -102,6 +102,9 @@ MAX_DAILY_LOSS=10
 - `MOMENTUM_THRESHOLD = 0.70` (in momentum_strategy.py)
 - `volume_ratio < 1.5` - current candle volume filter (in momentum_strategy.py)
 - `vol_min3 < 1.5` - sustained volume filter, min of last 3 candles (in momentum_strategy.py)
+- `DEFAULT_STOP_LOSS_PCT = 3.0` - 3% stop loss (in config.py)
+- `DEFAULT_TAKE_PROFIT_PCT = 1.3` - initial TP trigger, then trails (in config.py)
+- `TRAILING_STOP_AFTER_TP = 1.0` - 1% trailing stop after TP hit (in trading_bot.py)
 - `max_single_position = self.balance * 0.20` (in risk_manager.py)
 
 ---
