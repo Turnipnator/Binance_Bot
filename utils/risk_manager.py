@@ -664,9 +664,7 @@ class RiskManager:
         if len(self.positions) >= Config.MAX_CONCURRENT_TRADES:
             return False, f"Max concurrent trades reached ({Config.MAX_CONCURRENT_TRADES})"
 
-        # Check daily loss limit
-        if self.daily_pnl <= -Config.MAX_DAILY_LOSS:
-            return False, f"Daily loss limit reached (${self.daily_pnl:.2f})"
+        # Daily loss limit disabled - user manages risk via Telegram /stop and /emergency
 
         return True, "Position approved"
 
@@ -833,7 +831,12 @@ class RiskManager:
         """Reset daily statistics (call at start of new day)"""
         self.daily_pnl = 0.0
         self.daily_trades = 0
-        logger.info("Daily statistics reset")
+        self.winning_trades = 0
+        self.losing_trades = 0
+        self.cooldown_periods.clear()
+        self.symbol_trade_counts.clear()
+        self._save_daily_pnl()
+        logger.info("Daily statistics reset for new trading day")
 
     def display_portfolio(self):
         """Display portfolio status"""

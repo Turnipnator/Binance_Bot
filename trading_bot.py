@@ -784,28 +784,36 @@ class BinanceTradingBot:
 
             return False  # Continue trading to maximize profit
 
-        # Check loss limit
+        # Daily loss limit disabled - user manages risk via Telegram /stop and /emergency
+        # Still log a warning for awareness
         if daily_pnl <= -Config.MAX_DAILY_LOSS:
             if not self.daily_loss_limit_reached:
-                logger.error(
-                    f"Daily loss limit REACHED! ${daily_pnl:.2f} <= -${Config.MAX_DAILY_LOSS:.2f}"
+                logger.warning(
+                    f"Daily loss warning: ${daily_pnl:.2f} (threshold: -${Config.MAX_DAILY_LOSS:.2f})"
                 )
                 self.daily_loss_limit_reached = True
 
-                # Send Telegram notification
                 if self.telegram_bot:
                     await self.telegram_bot.notify_daily_loss_limit(daily_pnl)
 
-            return True  # Stop trading
-
-        return False
+        return False  # Never stop trading automatically
 
     async def monitor_performance(self):
         """Monitor and log performance metrics"""
+        current_day = datetime.now().strftime('%Y-%m-%d')
+
         while self.is_running:
             await asyncio.sleep(300)  # Update every 5 minutes
 
             try:
+                # Check for midnight rollover - reset daily stats
+                today = datetime.now().strftime('%Y-%m-%d')
+                if today != current_day:
+                    logger.info(f"New trading day detected: {today} (was {current_day})")
+                    self.risk_manager.reset_daily_stats()
+                    self.daily_profit_target_met = False
+                    current_day = today
+
                 # Stale position check disabled - let TP/SL handle exits
                 # Positions ride to 1.3% win or 5% loss, time doesn't matter
 
