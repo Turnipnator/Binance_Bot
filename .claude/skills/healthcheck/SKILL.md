@@ -8,10 +8,8 @@ description: Run a comprehensive health check on the Binance trading bot
 Run a comprehensive health check on the binance-trading-bot. Work through each section systematically and provide a summary dashboard at the end.
 
 ## VPS Details
-- Server: 109.199.105.63
-- SSH Key: ~/.ssh/id_ed25519_vps
-- Container: binance-trading-bot
-- Path: /opt/Binance_Bot
+Read VPS connection details from CLAUDE.local.md (contains server IP, SSH key path, bot path).
+- Container name: binance-trading-bot
 
 ## 1. PROCESS STATUS
 - Is the bot process running? Check with `docker ps`
@@ -19,7 +17,7 @@ Run a comprehensive health check on the binance-trading-bot. Work through each s
 - Any recent restarts or crashes?
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}\t{{.Status}}\t{{.RunningFor}}' | grep binance"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker ps --format '{{.Names}}\t{{.Status}}\t{{.RunningFor}}' | grep binance"
 ```
 
 ## 2. LOG ANALYSIS
@@ -28,8 +26,8 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker ps --format '{{.Names}}
 - Look for WebSocket connection issues
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs binance-trading-bot --tail 100 2>&1"
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs binance-trading-bot 2>&1 | grep -iE 'error|warn|fail|disconnect|reconnect|rate.limit' | tail -20"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker logs binance-trading-bot --tail 100 2>&1"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker logs binance-trading-bot 2>&1 | grep -iE 'error|warn|fail|disconnect|reconnect|rate.limit' | tail -20"
 ```
 
 ## 3. SIGNAL GENERATION
@@ -38,8 +36,8 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker logs binance-trading-bo
 - Check data files for recent activity
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "ls -la /opt/Binance_Bot/data/"
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec binance-trading-bot cat /app/data/state.json 2>/dev/null || echo 'No state file'"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "ls -la <BOT_PATH>/data/"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker exec binance-trading-bot cat /app/data/state.json 2>/dev/null || echo 'No state file'"
 ```
 
 ## 4. PERFORMANCE METRICS
@@ -48,15 +46,15 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec binance-trading-bo
 - Check open positions
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec binance-trading-bot cat /app/data/trading_stats.json 2>/dev/null || echo 'No stats file'"
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "docker exec binance-trading-bot cat /app/data/positions.json 2>/dev/null || echo 'No positions file'"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker exec binance-trading-bot cat /app/data/trading_stats.json 2>/dev/null || echo 'No stats file'"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker exec binance-trading-bot cat /app/data/positions.json 2>/dev/null || echo 'No positions file'"
 ```
 
 ## 5. SYSTEM RESOURCES
 - RAM usage, disk space, CPU usage
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "free -h && echo '---' && df -h / && echo '---' && top -bn1 | head -12"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "free -h && echo '---' && df -h / && echo '---' && top -bn1 | head -12"
 ```
 
 ## 6. CONFIGURATION REVIEW
@@ -64,7 +62,7 @@ ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "free -h && echo '---' && df -h
 - Verify trading pairs configured
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_vps root@109.199.105.63 "grep -E 'ENABLE_|TRADING_PAIRS|MODE|STRATEGY' /opt/Binance_Bot/.env 2>/dev/null | head -15"
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "grep -E 'ENABLE_|TRADING_PAIRS|MODE|STRATEGY' <BOT_PATH>/.env 2>/dev/null | head -15"
 ```
 
 ## 7. BINANCE-SPECIFIC CHECKS
