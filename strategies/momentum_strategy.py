@@ -145,111 +145,64 @@ class MomentumStrategy:
 
     def check_higher_timeframe_confirmation(self) -> Tuple[bool, str]:
         """
-        Check 4H timeframe for trend confirmation
-        Filters out false 1H breakouts by requiring 4H support
+        Check 1H timeframe for trend confirmation.
+        Requires price to be above the 1H EMA50 - filters out entries
+        during bearish markets where brief 5m impulses trigger false signals.
 
         Returns:
             Tuple of (confirmed, reason)
         """
         if not self.client:
-            logger.warning("No client available for 4H confirmation, skipping check")
+            logger.warning("No client available for 1H confirmation, skipping check")
             return True, "No client (bypassed)"
 
         try:
             import pandas as pd
             import pandas_ta as ta
 
-            # Fetch 4H klines (last 200 candles = ~33 days)
+            # Fetch 1H klines (last 100 candles = ~4 days)
             klines = self.client.get_historical_klines(
                 symbol=self.symbol,
-                interval='4h',
-                limit=200
+                interval='1h',
+                limit=100
             )
 
-            # Testnet has limited data (~7 candles), mainnet has full history
-            # Adjust minimum requirement based on what's available
-            min_candles = 7 if len(klines) < 50 else 50
+            if not klines or len(klines) < 55:
+                logger.warning(f"Insufficient 1H data for {self.symbol}: {len(klines) if klines else 0} candles")
+                return True, "Insufficient 1H data (bypassed)"
 
-            if not klines or len(klines) < min_candles:
-                logger.warning(f"Insufficient 4H data for {self.symbol}: {len(klines)} candles")
-                return False, f"Insufficient 4H data ({len(klines)} candles)"
-
-            # Convert to DataFrame
             df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_volume', 'trades', 'taker_buy_base',
                 'taker_buy_quote', 'ignore'
             ])
 
-            # Convert to float
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = df[col].astype(float)
 
-            # Adaptive periods based on available data
-            # Testnet has ~7 candles, mainnet has 200+
-            data_len = len(df)
-            if data_len < 50:  # Testnet mode - use shorter periods
-                ema_fast = min(3, data_len - 1)
-                ema_mid = min(5, data_len - 1)
-                ema_slow = min(7, data_len - 1)
-                macd_fast = min(3, data_len - 1)
-                macd_slow = min(5, data_len - 1)
-                macd_signal = min(3, data_len - 1)
-                logger.debug(f"4H testnet mode for {self.symbol}: using short EMAs ({ema_fast}/{ema_mid}/{ema_slow})")
-            else:  # Mainnet mode - use full periods
-                ema_fast, ema_mid, ema_slow = 20, 50, 200
-                macd_fast, macd_slow, macd_signal = 12, 26, 9
+            # Calculate 1H EMA50
+            df['ema50'] = ta.ema(df['close'], length=50)
 
-            # Calculate 4H EMAs with adaptive periods
-            df['ema_fast'] = ta.ema(df['close'], length=ema_fast)
-            df['ema_mid'] = ta.ema(df['close'], length=ema_mid)
-            df['ema_slow'] = ta.ema(df['close'], length=ema_slow)
-
-            # Calculate 4H MACD with adaptive periods
-            macd_data = ta.macd(df['close'], fast=macd_fast, slow=macd_slow, signal=macd_signal)
-            df['macd'] = macd_data[f'MACD_{macd_fast}_{macd_slow}_{macd_signal}']
-            df['macd_signal'] = macd_data[f'MACDs_{macd_fast}_{macd_slow}_{macd_signal}']
-            df['macd_histogram'] = macd_data[f'MACDh_{macd_fast}_{macd_slow}_{macd_signal}']
-
-            # Get latest values
             latest = df.iloc[-1]
-            ema_f = latest['ema_fast']
-            ema_m = latest['ema_mid']
-            ema_s = latest['ema_slow']
             current_price = latest['close']
-            macd = latest['macd']
-            macd_sig = latest['macd_signal']
-            macd_hist = latest['macd_histogram']
+            ema50 = latest['ema50']
 
-            # Check if values are valid (not NaN)
-            if pd.isna(ema_f) or pd.isna(ema_m) or pd.isna(ema_s) or pd.isna(macd) or pd.isna(macd_sig) or pd.isna(macd_hist):
-                logger.debug(f"4H data contains NaN values for {self.symbol}, skipping confirmation")
-                return False, "Insufficient 4H data (NaN values)"
+            if pd.isna(ema50):
+                logger.debug(f"1H EMA50 is NaN for {self.symbol}, bypassing check")
+                return True, "1H EMA50 not ready (bypassed)"
 
-            # Check 1: 4H EMA Alignment (bullish)
-            ema_aligned = (ema_f > ema_m > ema_s) and (current_price > ema_f)
-
-            # Check 2: 4H MACD Bullish
-            macd_bullish = (macd > macd_sig) and (macd_hist > 0)
-
-            # Both must be true
-            if ema_aligned and macd_bullish:
-                logger.info(f"✅ 4H confirmation: EMA aligned + MACD bullish for {self.symbol}")
-                return True, "4H trend confirmed"
-            elif not ema_aligned and not macd_bullish:
-                logger.debug(f"❌ 4H rejection: EMA NOT aligned + MACD NOT bullish for {self.symbol}")
-                return False, "4H trend not confirmed (EMA + MACD)"
-            elif not ema_aligned:
-                logger.debug(f"❌ 4H rejection: EMA NOT aligned for {self.symbol}")
-                return False, "4H EMA not aligned"
+            if current_price > ema50:
+                pct_above = ((current_price - ema50) / ema50) * 100
+                logger.info(f"✅ 1H confirmation: {self.symbol} price ${current_price:.2f} above 1H EMA50 ${ema50:.2f} (+{pct_above:.1f}%)")
+                return True, "1H trend confirmed"
             else:
-                logger.debug(f"❌ 4H rejection: MACD NOT bullish for {self.symbol}")
-                return False, "4H MACD not bullish"
+                pct_below = ((ema50 - current_price) / ema50) * 100
+                logger.info(f"❌ 1H rejection: {self.symbol} price ${current_price:.2f} below 1H EMA50 ${ema50:.2f} (-{pct_below:.1f}%)")
+                return False, f"1H price below EMA50 (-{pct_below:.1f}%)"
 
         except Exception as e:
-            logger.error(f"Error checking 4H confirmation for {self.symbol}: {e}")
-            # On error, don't block trades (fail open)
-            return True, f"4H check error (bypassed): {str(e)[:50]}"
+            logger.error(f"Error checking 1H confirmation for {self.symbol}: {e}")
+            return True, f"1H check error (bypassed): {str(e)[:50]}"
 
     def should_enter_long(self, technical_data: Dict, min_score: float = 0.70) -> Tuple[bool, float, Dict]:
         """
@@ -306,12 +259,12 @@ class MomentumStrategy:
             logger.debug(f"Insufficient sustained volume: vol_min3={vol_min3:.2f}x (need >= 1.5x sustained)")
             return False, momentum_score, momentum_data
 
-        # 4H timeframe confirmation DISABLED for testnet (insufficient historical data)
-        # Other filters (3-layer trend, CHOPPY, momentum, volume) provide confirmation
-        # htf_confirmed, htf_reason = self.check_higher_timeframe_confirmation()
-        # if not htf_confirmed:
-        #     logger.info(f"4H filter rejection for {self.symbol}: {htf_reason} (1H score was {momentum_score:.2f})")
-        #     return False, momentum_score, momentum_data
+        # 1H timeframe confirmation - reject entries when price is below 1H EMA50
+        # Prevents entering on brief 5m bullish impulses in a larger bearish trend
+        htf_confirmed, htf_reason = self.check_higher_timeframe_confirmation()
+        if not htf_confirmed:
+            logger.info(f"1H filter rejection for {self.symbol}: {htf_reason} (score was {momentum_score:.2f})")
+            return False, momentum_score, momentum_data
 
         # All conditions met
         confidence = momentum_score
