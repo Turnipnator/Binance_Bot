@@ -147,9 +147,6 @@ class RiskManager:
                 'daily_pnl': self.daily_pnl,
                 'daily_trades': self.daily_trades,
                 'last_updated': datetime.now().isoformat(),
-                'winning_trades': self.winning_trades,
-                'losing_trades': self.losing_trades,
-                'total_trades': self.total_trades
             }
 
             # Ensure directory exists

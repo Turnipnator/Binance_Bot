@@ -410,11 +410,12 @@ class BinanceTradingBot:
 
         # TRAILING TP/SL SYSTEM:
         # Phase 1: Wait for price to reach initial TP level (default 1.3%)
-        # Phase 2: Once TP hit, trail with 1% stop from highest price (let winners run)
+        # Phase 2: Once TP hit, trail with 1.5% stop from highest, floored at entry
+        #          (let winners run; never give back below entry once TP triggered)
         # Stop Loss: per-symbol (default 3%, meme coins may use custom)
 
         take_profit_pct = Config.get_take_profit_pct(symbol)
-        TRAILING_STOP_AFTER_TP = 1.0  # 1% trailing stop after TP is hit
+        TRAILING_STOP_AFTER_TP = 1.5  # 1.5% trail from peak after TP triggered
 
         if position.side == 'BUY':
             current_profit_pct = ((current_price - position.entry_price) / position.entry_price) * 100
@@ -422,8 +423,11 @@ class BinanceTradingBot:
 
             # Check if we've ever reached the TP level (using highest_price tracker)
             if position.highest_price >= tp_level:
-                # Phase 2: TP was hit - now trailing with tight stop from highest
-                trail_stop = position.highest_price * (1 - TRAILING_STOP_AFTER_TP / 100)
+                # Phase 2: TP was hit - now trailing with stop from highest, floored at entry
+                trail_stop = max(
+                    position.highest_price * (1 - TRAILING_STOP_AFTER_TP / 100),
+                    position.entry_price,
+                )
 
                 if current_price <= trail_stop:
                     exit_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100

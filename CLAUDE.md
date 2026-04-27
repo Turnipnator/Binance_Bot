@@ -6,7 +6,7 @@
 
 ## CRITICAL RULES
 
-1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), trailing TP (after 1.3%), SL (3%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
+1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), trailing TP (after 1.3% with 1.5% trail floored at entry), SL (3%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
 
 2. **Always backup before significant changes** - Use the backup commands in CLAUDE.local.md before modifying core logic.
 
@@ -19,9 +19,14 @@
 This is a cryptocurrency trading bot for Binance Spot trading. It uses a momentum-based strategy with strict risk management.
 
 ### Key Stats
-- **Win Rate**: ~80% (backtest verified)
-- **Strategy**: Momentum with EMA stack + sustained volume filter
+- **Strategy**: Momentum with EMA stack + sustained volume filter, 1H EMA50 HTF gate
 - **Direction**: LONG only (shorts disabled - crypto has bullish bias)
+- **Live performance** (52 trades, 2026-01-09 → 2026-04-16):
+  - Win rate: 59.6% (31W / 21L)
+  - Net P&L: -$41.34, profit factor 0.61
+  - Avg win +$2.10 / avg loss -$5.07 — **structural risk/reward asymmetry**
+  - All 21 losses hit full SL (median -3.19%); 84% of wins exited <=1.5%
+- Original ~80% backtest figure has not held up in live trading; SL/TP geometry is the prime suspect.
 
 ---
 
@@ -64,7 +69,7 @@ Binance_Bot/
 
 ### Exit Criteria
 - Stop Loss: 3% from entry (default, meme coins may differ)
-- Take Profit: Trailing after 1.3% - once price reaches +1.3%, trails with 1% stop from highest
+- Take Profit: Trailing after 1.3% - once price reaches +1.3%, trails with 1.5% stop from highest, floored at entry price (TP-triggered trades cannot close below entry)
 - Lets winners run beyond 1.3% on strong trends
 
 ### Position Sizing
@@ -104,7 +109,7 @@ MAX_DAILY_LOSS=10
 - `vol_min3 < 1.5` - sustained volume filter, min of last 3 candles (in momentum_strategy.py)
 - `DEFAULT_STOP_LOSS_PCT = 3.0` - 3% stop loss (in config.py)
 - `DEFAULT_TAKE_PROFIT_PCT = 1.3` - initial TP trigger, then trails (in config.py)
-- `TRAILING_STOP_AFTER_TP = 1.0` - 1% trailing stop after TP hit (in trading_bot.py)
+- `TRAILING_STOP_AFTER_TP = 1.5` - 1.5% trailing stop after TP hit, floored at entry (in trading_bot.py)
 - `max_single_position = self.balance * 0.20` (in risk_manager.py)
 
 ---
