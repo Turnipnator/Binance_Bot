@@ -304,6 +304,11 @@ class BinanceTradingBot:
                     await asyncio.sleep(60)  # Check again in 1 minute
                     continue
 
+                # Skip symbols Binance has rejected as not tradable on this account
+                if not self.client.is_symbol_permitted(symbol):
+                    await asyncio.sleep(300)
+                    continue
+
                 # Get market data
                 klines = self.client.get_historical_klines(symbol, '5m', limit=200)
                 if not klines:

@@ -35,6 +35,7 @@ class ResilientBinanceClient:
         self.max_retries = 5
         self.base_delay = 1
         self.symbol_info_cache = {}  # Cache for symbol precision info
+        self.denied_symbols: set = set()  # Symbols rejected by Binance as not tradable on this account
 
         # Initialize client with retry logic
         self._initialize_client_with_retry()
@@ -104,9 +105,21 @@ class ResilientBinanceClient:
                     time.sleep(wait_time + random.uniform(0, 1))
                     continue
 
-                # Handle insufficient balance
+                # Handle insufficient balance / symbol-not-permitted (both surface as -2010)
                 elif e.code == -2010:
-                    logger.error(f"Insufficient balance: {e.message}")
+                    msg = (e.message or "")
+                    if "not permitted for this account" in msg.lower():
+                        symbol = kwargs.get('symbol')
+                        if symbol:
+                            self.denied_symbols.add(symbol)
+                            logger.warning(
+                                f"🚫 {symbol} not permitted for this account — adding to deny-list, "
+                                f"future signals on this symbol will be skipped"
+                            )
+                        else:
+                            logger.error(f"Order rejected (not permitted), no symbol in call: {msg}")
+                    else:
+                        logger.error(f"Insufficient balance: {msg}")
                     return None
 
                 # Handle order-specific errors
@@ -127,6 +140,10 @@ class ResilientBinanceClient:
                 time.sleep(self.base_delay * (2 ** attempt))
 
         raise Exception(f"Failed after {self.max_retries} attempts")
+
+    def is_symbol_permitted(self, symbol: str) -> bool:
+        """Return False if this symbol has previously failed with 'not permitted for this account'."""
+        return symbol not in self.denied_symbols
 
     def get_account_balance(self) -> Dict[str, float]:
         """
@@ -288,6 +305,8 @@ class ResilientBinanceClient:
                 side=side,
                 quantity=formatted_quantity
             )
+            if order is None:
+                return None
             logger.success(f"Market order placed: {order['orderId']}")
             return order
         except Exception as e:
