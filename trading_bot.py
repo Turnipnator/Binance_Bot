@@ -739,6 +739,7 @@ class BinanceTradingBot:
                 'take profit': 'take_profit',
                 'stop loss': 'stop_loss',
                 'trailing stop': 'trailing_stop',
+                'trailing take profit': 'trailing_take_profit',
                 'emergency stop': 'emergency',
                 'manual': 'manual'
             }
