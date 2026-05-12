@@ -224,38 +224,56 @@ class MomentumStrategy:
         if self.in_position:
             return False, 0.0, momentum_data
 
+        rsi = technical_data.get('rsi', 50)
+        trend = technical_data.get('trend', 'sideways')
+        volume_ratio = technical_data.get('volume_ratio', 1.0)
+        vol_min3 = technical_data.get('vol_min3', 0.0)
+        atr_pct = technical_data.get('atr_pct', 0.0)
+
+        def emit_decision(outcome, reason=''):
+            # Audit log for every near-fire decision; grep "ENTRY_DECISION" to analyze.
+            if momentum_score >= 0.60:
+                tail = f" reason={reason}" if reason else ""
+                logger.info(
+                    f"ENTRY_DECISION {self.symbol} score={momentum_score:.2f} "
+                    f"rsi={rsi:.1f} trend={trend} vol_ratio={volume_ratio:.2f} "
+                    f"vol_min3={vol_min3:.2f} atr_pct={atr_pct:.2f} outcome={outcome}{tail}"
+                )
+
         # Check minimum score
         if momentum_score < min_score:
+            emit_decision('REJECT', f'score<{min_score}')
             logger.debug(f"Momentum score too low: {momentum_score:.2f} < {min_score}")
             return False, momentum_score, momentum_data
 
         # Additional filters
-        rsi = technical_data.get('rsi', 50)
         if rsi > Config.RSI_OVERBOUGHT:
+            emit_decision('REJECT', f'rsi_overbought({rsi:.1f})')
             logger.debug(f"RSI overbought: {rsi:.1f}")
             return False, momentum_score, momentum_data
 
         # CRITICAL: TREND FILTER - Require BULLISH trend
         # Only trade when trend is clearly bullish - reject sideways AND bearish
         # This prevents weak signals in ranging or downtrending markets
-        trend = technical_data.get('trend', 'sideways')
         if trend != 'bullish':
+            emit_decision('REJECT', f'trend_{trend}')
             logger.info(f"❌ Trend filter: {self.symbol} trend is {trend.upper()} - only BULLISH allowed (score was {momentum_score:.2f})")
             return False, momentum_score, momentum_data
 
         # Check trend
         if not momentum_data['trend_bullish']:
+            emit_decision('REJECT', 'ema_stack_not_bullish')
             logger.debug("Trend not bullish")
             return False, momentum_score, momentum_data
 
         # CRITICAL: Check volume BEFORE entering
         # Require 1.5x volume surge AND sustained volume over last 3 candles
-        volume_ratio = technical_data.get('volume_ratio', 1.0)
-        vol_min3 = technical_data.get('vol_min3', 0.0)
         if volume_ratio < 1.5:
+            emit_decision('REJECT', f'vol_ratio<1.5({volume_ratio:.2f})')
             logger.debug(f"Insufficient volume for entry: {volume_ratio:.2f}x (need >= 1.5x)")
             return False, momentum_score, momentum_data
         if vol_min3 < 1.5:
+            emit_decision('REJECT', f'vol_min3<1.5({vol_min3:.2f})')
             logger.debug(f"Insufficient sustained volume: vol_min3={vol_min3:.2f}x (need >= 1.5x sustained)")
             return False, momentum_score, momentum_data
 
@@ -263,10 +281,12 @@ class MomentumStrategy:
         # Prevents entering on brief 5m bullish impulses in a larger bearish trend
         htf_confirmed, htf_reason = self.check_higher_timeframe_confirmation()
         if not htf_confirmed:
+            emit_decision('REJECT', f'htf({htf_reason})')
             logger.info(f"1H filter rejection for {self.symbol}: {htf_reason} (score was {momentum_score:.2f})")
             return False, momentum_score, momentum_data
 
         # All conditions met
+        emit_decision('PASS')
         confidence = momentum_score
         logger.info(f"✅ Momentum entry signal: score={momentum_score:.2f}, confidence={confidence:.2f}, volume={volume_ratio:.2f}x, vol_min3={vol_min3:.2f}x")
 
