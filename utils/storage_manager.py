@@ -121,7 +121,8 @@ class StorageManager:
                 - fees_usdt: Total fees (optional)
                 - entry_time: ISO timestamp
                 - exit_time: ISO timestamp
-                - exit_reason: "take_profit", "stop_loss", "trailing_stop", "manual"
+                - exit_reason: "take_profit", "stop_loss", "trailing_stop",
+                  "trailing_take_profit", "emergency", "manual", "unknown"
                 - is_win: True if profitable
 
         Returns:

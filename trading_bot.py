@@ -743,7 +743,16 @@ class BinanceTradingBot:
                 'emergency stop': 'emergency',
                 'manual': 'manual'
             }
-            exit_reason = reason_map.get(reason.lower().replace('[paper]', '').strip(), 'manual')
+            normalized_reason = reason.lower().replace('[paper]', '').strip()
+            exit_reason = reason_map.get(normalized_reason)
+            if exit_reason is None:
+                # Don't silently bucket unrecognized reasons as 'manual' - that masked
+                # 3 months of trailing-TP exits (see commit 11e64f2). Surface it instead.
+                logger.warning(
+                    f"Unmapped exit reason '{reason}' for {symbol} - storing as 'unknown'. "
+                    f"Add it to reason_map in _save_trade_to_storage()."
+                )
+                exit_reason = 'unknown'
 
             # Calculate P&L percentage
             pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
