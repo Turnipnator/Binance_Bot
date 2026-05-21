@@ -413,30 +413,34 @@ class BinanceTradingBot:
                     logger.info(f"✅ {symbol} price recovered to ${current_price:.2f} - stop loss NOT triggered (was bad data)")
                 self._stop_loss_confirmations[symbol] = 0
 
-        # TRAILING TP/SL SYSTEM:
-        # Phase 1: Wait for price to reach initial TP level (default 1.3%)
-        # Phase 2: Once TP hit, trail with 1.5% stop from highest, floored at entry
-        #          (let winners run; never give back below entry once TP triggered)
+        # TRAILING TP/SL SYSTEM (V3 - backtested 2026-05-21):
+        # Phase 1: hard SL at -3% until price reaches the arm trigger (default +0.5%).
+        # Phase 2: once armed, trail 1.5% from the highest price, but never let the
+        #          protective stop fall below -1% of entry (TRAILING_FLOOR_PCT). The
+        #          -1% floor (instead of breakeven) lets a winner survive a small dip
+        #          after arming and still run, while capping "pop then fade" losers at
+        #          ~-1% instead of the full -3%.
         # Stop Loss: per-symbol (default 3%, meme coins may use custom)
 
         take_profit_pct = Config.get_take_profit_pct(symbol)
-        TRAILING_STOP_AFTER_TP = 1.5  # 1.5% trail from peak after TP triggered
+        TRAILING_STOP_AFTER_TP = 1.5  # 1.5% trail from peak after arming
+        TRAILING_FLOOR_PCT = 1.0      # protective stop floored at -1% of entry after arming
 
         if position.side == 'BUY':
             current_profit_pct = ((current_price - position.entry_price) / position.entry_price) * 100
             tp_level = position.entry_price * (1 + take_profit_pct / 100)
 
-            # Check if we've ever reached the TP level (using highest_price tracker)
+            # Check if we've ever reached the arm trigger (using highest_price tracker)
             if position.highest_price >= tp_level:
-                # Phase 2: TP was hit - now trailing with stop from highest, floored at entry
+                # Phase 2: armed - trail from highest, floored at -1% of entry
                 trail_stop = max(
                     position.highest_price * (1 - TRAILING_STOP_AFTER_TP / 100),
-                    position.entry_price,
+                    position.entry_price * (1 - TRAILING_FLOOR_PCT / 100),
                 )
 
                 if current_price <= trail_stop:
                     exit_pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
-                    logger.info(f"🎯 Trailing TP exit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f}, +{exit_pnl_pct:.2f}%)")
+                    logger.info(f"🎯 Trailing exit for {symbol} at ${current_price:.2f} (high was ${position.highest_price:.2f}, {exit_pnl_pct:+.2f}%)")
                     await self._close_position(symbol, current_price, "Trailing take profit")
                     return
                 else:

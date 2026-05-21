@@ -364,8 +364,9 @@ class MomentumStrategy:
 
     def calculate_take_profit(self, entry_price: float, stop_loss: float, risk_reward: float = 3.0) -> float:
         """
-        Calculate take profit at 1.3% above entry price.
-        Lock in small gains quickly rather than hoping for big moves.
+        Reference take-profit level shown at entry (the +0.5% arm trigger for the
+        trailing stop). The actual exit is managed by the trailing system in
+        trading_bot.py; this value is for the entry notification/record only.
 
         Args:
             entry_price: Entry price
@@ -373,10 +374,10 @@ class MomentumStrategy:
             risk_reward: Risk-reward ratio (unused, kept for compatibility)
 
         Returns:
-            Take profit price (1.3% above entry)
+            Take profit price (+0.5% above entry, the trail arm trigger)
         """
-        # 1.3% take profit - lock in gains quickly
-        take_profit = entry_price * 1.013
+        # +0.5% arm trigger - trailing stop then takes over (V3 exit rule)
+        take_profit = entry_price * 1.005
 
         return take_profit
 

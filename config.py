@@ -144,7 +144,7 @@ class Config:
 
     # Default stop loss and take profit (used when no override exists)
     DEFAULT_STOP_LOSS_PCT = 3.0   # 3% stop loss
-    DEFAULT_TAKE_PROFIT_PCT = 1.3  # 1.3% take profit
+    DEFAULT_TAKE_PROFIT_PCT = 0.5  # +0.5% arm trigger for the trailing stop (V3 exit rule, backtested 2026-05-21)
 
     @classmethod
     def get_stop_loss_pct(cls, symbol: str) -> float:
