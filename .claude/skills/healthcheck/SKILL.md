@@ -77,6 +77,24 @@ ssh -i <SSH_KEY> <USER>@<VPS_IP> "grep -E 'ENABLE_|TRADING_PAIRS|MODE|STRATEGY' 
 - Is the strategy performing as expected?
 - Any parameter tweaks recommended?
 
+## 8.5 MEAN-REVERSION MONITOR (live vs backtest)
+The mean-reversion strategy went live 2026-07-02 with an **unproven** live edge (deployed on a 53-trade backtest, PF 1.82 @0.2% fee). This section tracks whether the real fills hold up. Run the monitor (stdlib-only, runs on the VPS host — no container/rebuild needed):
+
+```bash
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "python3 /opt/Binance_Bot/mr_monitor.py"
+```
+
+Interpret the output:
+- **0 MR trades**: strategy is armed but dormant (needs BTC > daily EMA50 **and** a liquid pair at 15m RSI<30). Nothing to judge yet — expected while BTC is below its daily EMA50.
+- **<30 trades**: directional only, not conclusive.
+- **Key comparisons vs backtest** (WR ~70%, PF 1.82, avgW +0.59% / avgL −0.80%):
+  - PF < 1.0 over 30+ trades → **losing**; recommend the kill switch the monitor prints (`ENABLE_MEAN_REVERSION=false`).
+  - avgW materially below backtest → **slippage/execution drag** eroding the thin edge (the #1 risk flagged at deploy).
+  - Excess `stop_loss` exits (backtest exits mostly at the EMA20 target) → dips reverting less than modeled.
+- Per-strategy split: momentum vs mean_reversion trade counts and P&L are separable because trades are tagged `strategy` in `trades.json`.
+
+Report MR's live line, the backtest line, and a one-line verdict (on track / slipping / disable).
+
 ## 9. RECOMMENDATIONS
 Provide prioritised recommendations:
 - P1 (Critical): Issues that need immediate attention
@@ -93,6 +111,7 @@ Present a quick status summary table:
 | Signals Active | ?/? | |
 | Resources OK | ?/?/? | |
 | WebSocket Connected | ?/? | |
-| Strategy Edge | ?/?/? | |
+| Strategy Edge (momentum) | ?/?/? | |
+| Mean-Reversion vs Backtest | ?/?/? | n trades; on track / slipping / dormant |
 
 Traffic light summary: ? All good / ? Minor issues / ? Needs attention
