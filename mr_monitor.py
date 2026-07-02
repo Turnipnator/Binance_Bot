@@ -18,6 +18,61 @@ import json, os
 BT = {"wr": 69.8, "pf": 1.82, "avg_w_pct": 0.59, "avg_l_pct": -0.80}
 MIN_TRADES = 30   # below this the live sample is not statistically meaningful
 
+# Date both strategies went live under CURRENT rules (2% stop + BTC daily gate +
+# MR enabled). Trades before this are old-rule momentum and are NOT comparable.
+HEAD_TO_HEAD_CUTOFF = "2026-07-02"
+H2H_MIN = 15      # per-strategy trades before the head-to-head is worth reading
+
+
+def _strat_stats(trades):
+    n = len(trades)
+    if n == 0:
+        return None
+    wins = [t for t in trades if t.get("is_win")]
+    losses = [t for t in trades if not t.get("is_win")]
+    net = sum(t.get("pnl_usdt", 0) or 0 for t in trades)
+    gw = sum(t.get("pnl_usdt", 0) or 0 for t in wins)
+    gl = sum(t.get("pnl_usdt", 0) or 0 for t in losses)
+    return {
+        "n": n, "wr": 100.0 * len(wins) / n, "net": net,
+        "pf": (gw / abs(gl)) if gl else float("inf"),
+        "exp": net / n,   # expectancy $/trade - normalises for trade frequency
+    }
+
+
+def head_to_head(trades):
+    """Momentum vs mean_reversion, both under current rules (since the cutoff)."""
+    recent = [t for t in trades if (t.get("exit_time") or "") >= HEAD_TO_HEAD_CUTOFF]
+    mom = _strat_stats([t for t in recent if t.get("strategy") != "mean_reversion"])
+    mr = _strat_stats([t for t in recent if t.get("strategy") == "mean_reversion"])
+
+    print("\n=== STRATEGY HEAD-TO-HEAD (both under current rules, since %s) ===" % HEAD_TO_HEAD_CUTOFF)
+    print("  %-15s %4s %6s %9s %6s %11s" % ("strategy", "n", "WR%", "net$", "PF", "exp$/trade"))
+    for name, s in (("momentum", mom), ("mean_reversion", mr)):
+        if s is None:
+            print("  %-15s %4d %6s %9s %6s %11s" % (name, 0, "-", "-", "-", "-"))
+        else:
+            print("  %-15s %4d %6.1f %9.2f %6.2f %11.2f" % (
+                name, s["n"], s["wr"], s["net"], s["pf"], s["exp"]))
+
+    print("  VERDICT:")
+    if not mom and not mr:
+        print("    No trades under current rules yet (both gated off while BTC < daily EMA50).")
+        print("    Comparison begins once BTC reclaims its daily EMA50 and entries resume.")
+        return
+    if not (mom and mr):
+        only = "momentum" if mom else "mean_reversion"
+        print("    Only %s has traded so far - need both active for a fair comparison." % only)
+        return
+    lead_net = "momentum" if mom["net"] > mr["net"] else "mean_reversion"
+    lead_exp = "momentum" if mom["exp"] > mr["exp"] else "mean_reversion"
+    enough = mom["n"] >= H2H_MIN and mr["n"] >= H2H_MIN
+    note = "" if enough else "  (<%d trades each - NOT conclusive yet)" % H2H_MIN
+    print("    Total $ (grows the account): %s ahead." % lead_net)
+    print("    Per-trade edge (frequency-normalised): %s ahead.%s" % (lead_exp, note))
+    if lead_net != lead_exp:
+        print("    Split verdict - one wins on volume, the other on edge quality. Watch both.")
+
 
 def _find_trades():
     for p in ("/opt/Binance_Bot/data/trades.json", "data/trades.json", "/app/data/trades.json"):
@@ -42,6 +97,7 @@ def main():
     if not mr:
         print("\nNo mean_reversion trades yet. Strategy is armed but dormant until BTC > daily")
         print("EMA50 AND a liquid pair hits 15m RSI<30. Nothing to evaluate - re-run after it trades.")
+        head_to_head(trades)
         return
 
     wins = [t for t in mr if t.get("is_win")]
@@ -87,6 +143,8 @@ def main():
     print("\n  Kill switch if the edge isn't real:")
     print("  cd /opt/Binance_Bot && sed -i 's/ENABLE_MEAN_REVERSION=true/ENABLE_MEAN_REVERSION=false/' .env && \\")
     print("    rm -f data/bot.lock && docker compose up -d --force-recreate")
+
+    head_to_head(trades)
 
 
 if __name__ == "__main__":

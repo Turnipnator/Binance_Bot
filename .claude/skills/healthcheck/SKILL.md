@@ -93,7 +93,9 @@ Interpret the output:
   - Excess `stop_loss` exits (backtest exits mostly at the EMA20 target) → dips reverting less than modeled.
 - Per-strategy split: momentum vs mean_reversion trade counts and P&L are separable because trades are tagged `strategy` in `trades.json`.
 
-Report MR's live line, the backtest line, and a one-line verdict (on track / slipping / disable).
+The monitor also prints a **STRATEGY HEAD-TO-HEAD**: momentum vs mean_reversion, both under current rules (trades since 2026-07-02 only — earlier momentum trades are old-rule and NOT comparable). It reports each strategy's n / WR / net$ / PF / **expectancy $ per trade**. Read BOTH: net$ = what grows the account, expectancy = edge quality normalised for the fact MR trades far more often than momentum. Needs ~15 trades each before it's meaningful.
+
+Report MR's live line, the backtest line, the head-to-head table, and a one-line verdict (on track / slipping / disable; which strategy leads).
 
 ## 9. RECOMMENDATIONS
 Provide prioritised recommendations:
