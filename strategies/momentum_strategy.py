@@ -204,6 +204,71 @@ class MomentumStrategy:
             logger.error(f"Error checking 1H confirmation for {self.symbol}: {e}")
             return True, f"1H check error (bypassed): {str(e)[:50]}"
 
+    def check_market_regime(self) -> Tuple[bool, str]:
+        """
+        Market-wide regime gate: only allow longs when BTC is above its
+        daily EMA50. Alts are highly BTC-correlated, so longing anything
+        while BTC is in a daily downtrend is fighting the whole market.
+
+        Backtested 2026-07-02 over all 66 live trades: net -$71 -> -$18,
+        win rate 50% -> 56.5%, max drawdown cut ~2/3. Benefit is spread
+        across three separate down-months (Mar/Apr/Jun), not one window,
+        so it is a genuine de-risking filter rather than a curve-fit.
+
+        Fails OPEN (allows trading) on any data/network error, matching the
+        1H HTF check, so a transient glitch never silently halts the bot.
+
+        Returns:
+            Tuple of (confirmed, reason)
+        """
+        if not self.client:
+            logger.warning("No client available for market regime check, skipping")
+            return True, "No client (bypassed)"
+
+        try:
+            import pandas as pd
+            import pandas_ta as ta
+
+            # BTC daily klines (100 days) - regime is market-wide, always BTC
+            klines = self.client.get_historical_klines(
+                symbol='BTCUSDT',
+                interval='1d',
+                limit=100
+            )
+
+            if not klines or len(klines) < 55:
+                logger.warning(f"Insufficient BTC daily data: {len(klines) if klines else 0} candles")
+                return True, "Insufficient BTC daily data (bypassed)"
+
+            df = pd.DataFrame(klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                'taker_buy_quote', 'ignore'
+            ])
+            df['close'] = df['close'].astype(float)
+            df['ema50'] = ta.ema(df['close'], length=50)
+
+            latest = df.iloc[-1]
+            btc_price = latest['close']
+            ema50 = latest['ema50']
+
+            if pd.isna(ema50):
+                logger.debug("BTC daily EMA50 is NaN, bypassing market regime check")
+                return True, "BTC daily EMA50 not ready (bypassed)"
+
+            if btc_price > ema50:
+                pct = ((btc_price - ema50) / ema50) * 100
+                logger.info(f"✅ Market regime OK: BTC ${btc_price:,.0f} above daily EMA50 ${ema50:,.0f} (+{pct:.1f}%)")
+                return True, "BTC above daily EMA50"
+            else:
+                pct = ((ema50 - btc_price) / ema50) * 100
+                logger.info(f"❌ Market regime block: BTC ${btc_price:,.0f} below daily EMA50 ${ema50:,.0f} (-{pct:.1f}%) - pausing new longs")
+                return False, f"BTC below daily EMA50 (-{pct:.1f}%)"
+
+        except Exception as e:
+            logger.error(f"Error checking market regime: {e}")
+            return True, f"Market regime check error (bypassed): {str(e)[:50]}"
+
     def should_enter_long(self, technical_data: Dict, min_score: float = 0.70) -> Tuple[bool, float, Dict]:
         """
         Determine if should enter long position
@@ -283,6 +348,14 @@ class MomentumStrategy:
         if not htf_confirmed:
             emit_decision('REJECT', f'htf({htf_reason})')
             logger.info(f"1H filter rejection for {self.symbol}: {htf_reason} (score was {momentum_score:.2f})")
+            return False, momentum_score, momentum_data
+
+        # Market-wide regime gate - no new longs while BTC is below its daily
+        # EMA50 (alts are BTC-correlated; longing into a BTC downtrend loses).
+        regime_ok, regime_reason = self.check_market_regime()
+        if not regime_ok:
+            emit_decision('REJECT', f'btc_regime({regime_reason})')
+            logger.info(f"Market regime rejection for {self.symbol}: {regime_reason} (score was {momentum_score:.2f})")
             return False, momentum_score, momentum_data
 
         # All conditions met

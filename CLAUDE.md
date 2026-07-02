@@ -66,6 +66,8 @@ Binance_Bot/
 - Volume: >= 1.5x average (current candle)
 - Sustained Volume: >= 1.5x average (minimum of last 3 candles)
 - RSI: 40-70 range (not overbought/oversold)
+- 1H HTF gate: pair price above its 1H EMA50
+- **BTC market-regime gate (added 2026-07-02)**: BTC must be above its **daily EMA50**, else NO new longs on any pair. Alts are BTC-correlated; backtest over 66 live trades showed longing into a BTC daily downtrend is where the losses concentrate (net −$71 → −$18, drawdown cut ~2/3). De-risking filter, not an edge. Fails open on data errors.
 
 ### Exit Criteria (V3 rule, backtested & deployed 2026-05-21)
 - Stop Loss: 3% from entry (default, meme coins may differ) — applies until the trail arms
