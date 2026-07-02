@@ -6,6 +6,17 @@ from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 from loguru import logger
 
+# Liquid pairs only for the mean-reversion signal (excludes BONK/TAO where
+# slippage is worst and the backtest is least trustworthy). See memory
+# mean-reversion-signal-promising. Backtested 2026-07-02: PF 1.82 @0.2% fees.
+MR_LIQUID_PAIRS = {
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'LINKUSDT',
+    'LTCUSDT', 'ADAUSDT', 'AVAXUSDT', 'TRXUSDT', 'SUIUSDT',
+}
+MR_RSI_ENTRY = 30.0      # 15m RSI(14) oversold trigger
+MR_STOP_PCT = 3.0        # 3% hard stop (backtested sl3 variant)
+MR_MAX_HOLD_HOURS = 24   # time-stop
+
 
 @dataclass
 class ReversionSignal:
@@ -32,7 +43,7 @@ class MeanReversionStrategy:
     - Works best in ranging, non-trending markets
     """
 
-    def __init__(self, symbol: str, allocation: float = 0.2, risk_manager=None):
+    def __init__(self, symbol: str, allocation: float = 0.2, risk_manager=None, client=None):
         """
         Initialize mean reversion strategy
 
@@ -40,6 +51,7 @@ class MeanReversionStrategy:
             symbol: Trading pair symbol
             allocation: Portfolio allocation for this strategy
             risk_manager: Risk manager instance for stop loss calculations
+            client: Binance client for fetching 15m / BTC-daily data
         """
         self.symbol = symbol
         self.allocation = allocation
@@ -47,6 +59,8 @@ class MeanReversionStrategy:
         self.entry_price = 0.0
         self.mean_price = 0.0
         self.risk_manager = risk_manager
+        self.client = client
+        self._sig_cache = None  # stashed 15m computation to avoid double-fetch
 
         logger.info(f"Mean reversion strategy initialized for {symbol}")
 
@@ -163,29 +177,91 @@ class MeanReversionStrategy:
         Returns:
             Tuple of (should_enter, confidence, reversion_data)
         """
+        # VALIDATED mean-reversion pullback (backtested 2026-07-02, PF 1.82 @0.2% fees):
+        # in a confirmed uptrend (pair 15m close > 15m EMA200 AND BTC > daily EMA50),
+        # buy when 15m RSI(14) < 30. Liquid pairs only. Expensive 15m/BTC fetches are
+        # gated behind cheap checks (liquid, flat, 5m RSI already soft-oversold).
+        self._sig_cache = None
         if self.in_position:
             return False, 0.0, {}
+        if self.symbol not in MR_LIQUID_PAIRS:
+            return False, 0.0, {}
+        rsi_5m = technical_data.get('rsi', 50)
+        if rsi_5m is None or rsi_5m >= 40:   # cheap pre-gate, no fetch
+            return False, 0.0, {}
+        if not self.client:
+            logger.warning(f"MR: no client for {self.symbol}, cannot confirm 15m signal")
+            return False, 0.0, {}
 
-        reversion = self.analyze_reversion_opportunity(technical_data)
-        long_score = reversion['long_score']
+        ind = self._fetch_15m_indicators()
+        if ind is None:
+            return False, 0.0, {}
 
-        if long_score < min_score:
-            return False, long_score, reversion
+        if not (ind['close'] > ind['ema200']):          # uptrend intact
+            return False, 0.0, ind
+        if not (ind['rsi'] < MR_RSI_ENTRY):             # oversold trigger
+            return False, 0.0, ind
+        if not self._btc_daily_regime_ok():             # market regime (fails closed)
+            logger.info(f"MR {self.symbol}: 15m RSI {ind['rsi']:.1f} oversold in uptrend but BTC below daily EMA50 - skip")
+            return False, 0.0, ind
 
-        # Additional filter: avoid in strong downtrends
-        trend = technical_data.get('trend', 'sideways')
-        if trend == 'bearish':
-            ema_fast = technical_data.get('ema_fast', 0)
-            ema_trend = technical_data.get('ema_trend', 0)
-            # Only allow if not in severe downtrend
-            if ema_fast < ema_trend * 0.97:  # More than 3% below trend EMA
-                logger.debug("Strong downtrend, avoiding long")
-                return False, long_score, reversion
+        confidence = min(1.0, 0.75 + (MR_RSI_ENTRY - ind['rsi']) / 100.0)
+        ind['confidence'] = confidence
+        self._sig_cache = ind
+        logger.info(f"✅ MR LONG signal {self.symbol}: 15m RSI={ind['rsi']:.1f}<30, close>EMA200, BTC regime ok (conf {confidence:.2f})")
+        return True, confidence, ind
 
-        confidence = long_score
-        logger.info(f"Mean reversion LONG signal: score={long_score:.2f}")
+    def _fetch_15m_indicators(self) -> Optional[Dict]:
+        """Fetch 15m klines and compute RSI(14), EMA20, EMA200 on the last bar."""
+        try:
+            import pandas as pd
+            import pandas_ta as ta
+            kl = self.client.get_historical_klines(symbol=self.symbol, interval='15m', limit=250)
+            if not kl or len(kl) < 205:
+                logger.debug(f"MR {self.symbol}: insufficient 15m data ({len(kl) if kl else 0})")
+                return None
+            df = pd.DataFrame(kl, columns=['t','o','h','l','c','v','ct','qv','n','tb','tq','ig'])
+            for col in ['o','h','l','c']:
+                df[col] = df[col].astype(float)
+            df['ema200'] = ta.ema(df['c'], length=200)
+            df['ema20'] = ta.ema(df['c'], length=20)
+            df['rsi'] = ta.rsi(df['c'], length=14)
+            last = df.iloc[-1]
+            if pd.isna(last['ema200']) or pd.isna(last['ema20']) or pd.isna(last['rsi']):
+                return None
+            return {'rsi': float(last['rsi']), 'ema20': float(last['ema20']),
+                    'ema200': float(last['ema200']), 'close': float(last['c'])}
+        except Exception as e:
+            logger.error(f"MR {self.symbol}: 15m fetch error: {e}")
+            return None
 
-        return True, confidence, reversion
+    def _btc_daily_regime_ok(self) -> bool:
+        """BTC above its daily EMA50. Fails CLOSED (no MR entry if unknown) -
+        for a dip-buyer, uncertainty about the macro trend should block, not allow."""
+        try:
+            import pandas as pd
+            import pandas_ta as ta
+            kl = self.client.get_historical_klines(symbol='BTCUSDT', interval='1d', limit=100)
+            if not kl or len(kl) < 55:
+                return False
+            df = pd.DataFrame(kl, columns=['t','o','h','l','c','v','ct','qv','n','tb','tq','ig'])
+            df['c'] = df['c'].astype(float)
+            df['ema50'] = ta.ema(df['c'], length=50)
+            last = df.iloc[-1]
+            return False if pd.isna(last['ema50']) else bool(last['c'] > last['ema50'])
+        except Exception as e:
+            logger.error(f"MR: BTC regime check error: {e}")
+            return False
+
+    def should_exit_reversion(self, current_price: float) -> Tuple[bool, str]:
+        """Exit when 15m price reverts up to its EMA20 (the mean). Fails safe:
+        on data error, HOLD (the hard stop + time-stop still protect the position)."""
+        ind = self._fetch_15m_indicators()
+        if ind is None:
+            return False, "MR exit: 15m data unavailable (holding)"
+        if current_price >= ind['ema20']:
+            return True, "Mean reversion target (reverted to 15m EMA20)"
+        return False, "MR: below mean, holding"
 
     def should_exit_long(self, technical_data: Dict, current_price: float) -> Tuple[bool, str]:
         """
@@ -354,41 +430,33 @@ class MeanReversionStrategy:
         Returns:
             ReversionSignal or None
         """
-        # Check market conditions
-        is_suitable, reason = self.is_suitable_market_condition(technical_data)
-        if not is_suitable:
-            logger.debug(f"Market not suitable: {reason}")
-            return None
+        # Reuse the 15m computation stashed by should_enter_long in the same
+        # scan cycle (the entry loop calls should_enter_long immediately before
+        # this), avoiding a duplicate 15m/BTC fetch.
+        ind = self._sig_cache
+        if ind is None:
+            should_enter, _conf, ind = self.should_enter_long(technical_data)
+            if not should_enter:
+                return None
 
-        # Check for long opportunity
-        should_enter, confidence, reversion_data = self.should_enter_long(technical_data)
+        conf = ind.get('confidence', 0.75)
+        price = technical_data.get('price', 0) or ind.get('close', 0)
+        ema20 = ind.get('ema20', price)
 
-        if not should_enter:
-            return None
+        stop_loss = price * (1 - MR_STOP_PCT / 100.0)   # 3% hard stop (backtested)
+        take_profit = ema20                              # target = reversion to 15m mean
 
-        price = technical_data.get('price', 0)
-        atr = technical_data.get('atr', 0)
-        mean_price = reversion_data['deviation']['mean_price']
-
-        stop_loss = self.calculate_stop_loss(price, atr, 'long')
-        take_profit = self.calculate_take_profit(price, mean_price, 'long')
-
-        # Calculate reversion distance
-        reversion_distance = abs(price - mean_price) / mean_price
-
-        signal = ReversionSignal(
+        return ReversionSignal(
             symbol=self.symbol,
             side='BUY',
-            strength=reversion_data['long_score'],
+            strength=conf,
             entry_price=price,
-            mean_price=mean_price,
+            mean_price=ema20,
             stop_loss=stop_loss,
             take_profit=take_profit,
-            reversion_distance=reversion_distance,
-            confidence=confidence
+            reversion_distance=abs(price - ema20) / ema20 if ema20 else 0.0,
+            confidence=conf,
         )
-
-        return signal
 
 
 class BollingerReversionStrategy(MeanReversionStrategy):

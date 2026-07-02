@@ -16,7 +16,7 @@ from utils.technical_analysis import TechnicalAnalysis
 from utils.risk_manager import RiskManager
 from strategies.grid_strategy import GridTradingStrategy, DynamicGridStrategy
 from strategies.momentum_strategy import MomentumStrategy
-from strategies.mean_reversion_strategy import MeanReversionStrategy
+from strategies.mean_reversion_strategy import MeanReversionStrategy, MR_MAX_HOLD_HOURS
 from telegram_bot import TelegramBot
 from utils.storage_manager import get_storage
 
@@ -215,7 +215,8 @@ class BinanceTradingBot:
             strategies['mean_reversion'] = MeanReversionStrategy(
                 symbol=symbol,
                 allocation=Config.MEAN_REVERSION_ALLOCATION,
-                risk_manager=self.risk_manager  # Pass risk manager for percentage-based stops
+                risk_manager=self.risk_manager,  # Pass risk manager for percentage-based stops
+                client=self.client  # Pass client for 15m / BTC-daily data
             )
 
         logger.info(f"Strategies initialized for {symbol}: {list(strategies.keys())}")
@@ -413,6 +414,23 @@ class BinanceTradingBot:
                     logger.info(f"✅ {symbol} price recovered to ${current_price:.2f} - stop loss NOT triggered (was bad data)")
                 self._stop_loss_confirmations[symbol] = 0
 
+        # ISOLATED MEAN-REVERSION EXIT (does NOT touch the momentum V3 logic below):
+        # MR positions exit when 15m price reverts up to its EMA20, or after a 24h
+        # time-stop. The hard stop is already handled by the generic check above
+        # (MR sets a 3% stop at entry). Momentum positions skip this block entirely.
+        if getattr(position, 'strategy', 'momentum') == 'mean_reversion':
+            if time.time() - position.timestamp >= MR_MAX_HOLD_HOURS * 3600:
+                logger.info(f"⏲ MR time-exit for {symbol} at ${current_price:.4f} (held {MR_MAX_HOLD_HOURS}h)")
+                await self._close_position(symbol, current_price, "MR time exit")
+                return
+            mr = self.strategies.get(symbol, {}).get('mean_reversion')
+            if mr is not None:
+                should_exit, reason = mr.should_exit_reversion(current_price)
+                if should_exit:
+                    logger.info(f"🎯 MR exit for {symbol} at ${current_price:.4f}: {reason}")
+                    await self._close_position(symbol, current_price, reason)
+            return
+
         # TRAILING TP/SL SYSTEM (V3 - backtested 2026-05-21):
         # Phase 1: hard SL at -2% until price reaches the arm trigger (default +0.5%).
         # Phase 2: once armed, trail 1.5% from the highest price, but never let the
@@ -549,6 +567,9 @@ class BinanceTradingBot:
             strategy_name: Name of strategy triggering entry
         """
         try:
+            # Tag which strategy owns this position (routes exit logic later)
+            strat_tag = 'mean_reversion' if 'reversion' in strategy_name.lower() else 'momentum'
+
             # Calculate position size
             position_size, position_value = self.risk_manager.calculate_position_size(
                 symbol,
@@ -598,7 +619,8 @@ class BinanceTradingBot:
                         quantity=position_size,
                         stop_loss=stop_loss,
                         take_profit=take_profit,
-                        timestamp=time.time()
+                        timestamp=time.time(),
+                        strategy=strat_tag
                     )
 
                     # Update strategy state
@@ -632,7 +654,8 @@ class BinanceTradingBot:
                     quantity=position_size,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
-                    timestamp=time.time()
+                    timestamp=time.time(),
+                    strategy=strat_tag
                 )
 
                 # Send Telegram notification (paper trading)
@@ -745,7 +768,9 @@ class BinanceTradingBot:
                 'trailing stop': 'trailing_stop',
                 'trailing take profit': 'trailing_take_profit',
                 'emergency stop': 'emergency',
-                'manual': 'manual'
+                'manual': 'manual',
+                'mean reversion target (reverted to 15m ema20)': 'mean_reversion_target',
+                'mr time exit': 'mr_time_exit',
             }
             normalized_reason = reason.lower().replace('[paper]', '').strip()
             exit_reason = reason_map.get(normalized_reason)
@@ -764,7 +789,7 @@ class BinanceTradingBot:
             # Build trade record
             trade = {
                 'pair': symbol,
-                'strategy': 'momentum',
+                'strategy': getattr(position, 'strategy', 'momentum'),
                 'side': 'long',
                 'entry_price': position.entry_price,
                 'exit_price': exit_price,

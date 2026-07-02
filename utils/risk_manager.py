@@ -24,6 +24,7 @@ class Position:
     timestamp: float
     current_price: float = 0.0
     highest_price: float = 0.0  # Track highest price for trailing stop
+    strategy: str = 'momentum'  # which strategy opened it - routes exit logic
 
     @property
     def position_value(self) -> float:
@@ -173,7 +174,8 @@ class RiskManager:
                     'take_profit': position.take_profit,
                     'timestamp': position.timestamp,
                     'current_price': position.current_price,
-                    'highest_price': position.highest_price
+                    'highest_price': position.highest_price,
+                    'strategy': position.strategy
                 }
 
             data = {
@@ -210,7 +212,8 @@ class RiskManager:
                         take_profit=pos_data['take_profit'],
                         timestamp=pos_data['timestamp'],
                         current_price=pos_data.get('current_price', 0.0),
-                        highest_price=pos_data.get('highest_price', pos_data['entry_price'])
+                        highest_price=pos_data.get('highest_price', pos_data['entry_price']),
+                        strategy=pos_data.get('strategy', 'momentum')
                     )
                     self.positions[symbol] = position
 
@@ -673,7 +676,8 @@ class RiskManager:
         quantity: float,
         stop_loss: float,
         take_profit: float,
-        timestamp: float
+        timestamp: float,
+        strategy: str = 'momentum'
     ):
         """Add new position to tracking"""
         position = Position(
@@ -685,7 +689,8 @@ class RiskManager:
             take_profit=take_profit,
             timestamp=timestamp,
             current_price=entry_price,
-            highest_price=entry_price  # Initialize to entry price
+            highest_price=entry_price,  # Initialize to entry price
+            strategy=strategy
         )
 
         self.positions[symbol] = position
