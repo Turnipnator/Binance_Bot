@@ -20,6 +20,7 @@ This is a cryptocurrency trading bot for Binance Spot trading. It uses a momentu
 
 ### Key Stats
 - **Strategy**: Momentum with EMA stack + sustained volume filter, 1H EMA50 HTF gate
+- **Second strategy (LIVE 2026-07-02)**: Mean-reversion pullback — buy 15m RSI(14)<30 in an uptrend (pair 15m close>EMA200 AND BTC>daily EMA50), liquid pairs only, 3% stop, exit at 15m EMA20 or 24h time-stop. Runs alongside momentum via an isolated exit path (positions tagged `strategy`). Backtested PF 1.82 @0.2% fees but live edge UNPROVEN — kill switch `ENABLE_MEAN_REVERSION=false`. See CLAUDE.local.md + memory `mean-reversion-signal-promising`.
 - **Direction**: LONG only (shorts disabled - crypto has bullish bias)
 - **Live performance** (52 trades, 2026-01-09 → 2026-04-16):
   - Win rate: 59.6% (31W / 21L)
