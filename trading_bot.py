@@ -208,14 +208,14 @@ class BinanceTradingBot:
                 symbol=symbol,
                 allocation=Config.MOMENTUM_ALLOCATION,
                 client=self.client,  # Pass client for 4H timeframe confirmation
-                risk_manager=self.risk_manager  # Pass risk manager for fixed 5% stops
+                risk_manager=self.risk_manager  # Pass risk manager for percentage-based stops
             )
 
         if Config.ENABLE_MEAN_REVERSION:
             strategies['mean_reversion'] = MeanReversionStrategy(
                 symbol=symbol,
                 allocation=Config.MEAN_REVERSION_ALLOCATION,
-                risk_manager=self.risk_manager  # Pass risk manager for fixed 5% stops
+                risk_manager=self.risk_manager  # Pass risk manager for percentage-based stops
             )
 
         logger.info(f"Strategies initialized for {symbol}: {list(strategies.keys())}")
@@ -414,7 +414,7 @@ class BinanceTradingBot:
                 self._stop_loss_confirmations[symbol] = 0
 
         # TRAILING TP/SL SYSTEM (V3 - backtested 2026-05-21):
-        # Phase 1: hard SL at -3% until price reaches the arm trigger (default +0.5%).
+        # Phase 1: hard SL at -2% until price reaches the arm trigger (default +0.5%).
         # Phase 2: once armed, trail 1.5% from the highest price, but never let the
         #          protective stop fall below -1% of entry (TRAILING_FLOOR_PCT). The
         #          -1% floor (instead of breakeven) lets a winner survive a small dip
@@ -576,7 +576,7 @@ class BinanceTradingBot:
                 f"Strategy: {strategy_name}\n"
                 f"Entry: ${entry_price:.2f}\n"
                 f"Stop Loss: ${stop_loss:.2f} ({((stop_loss-entry_price)/entry_price*100):.2f}%)\n"
-                f"Exit Strategy: 3% SL / trailing after {Config.get_take_profit_pct(symbol)}% TP\n"
+                f"Exit Strategy: {Config.get_stop_loss_pct(symbol):.1f}% SL / trailing after {Config.get_take_profit_pct(symbol)}% TP\n"
                 f"Position Size: {position_size:.6f} ({symbol.replace('USDT', '')})\n"
                 f"Position Value: ${position_value:.2f}\n"
                 f"Risk: ${risk_amount:.2f}\n"
@@ -838,7 +838,7 @@ class BinanceTradingBot:
                     current_day = today
 
                 # Stale position check disabled - let TP/SL handle exits
-                # Positions ride to 1.3% win or 5% loss, time doesn't matter
+                # Positions ride the V3 trailing exit (arms +0.5%) or the 2% stop, time doesn't matter
 
                 summary = self.risk_manager.get_portfolio_summary()
 

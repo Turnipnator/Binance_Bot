@@ -143,7 +143,7 @@ class Config:
     SYMBOL_OVERRIDES = parse_symbol_overrides(os.getenv('MEME_COINS_CONFIG', ''))
 
     # Default stop loss and take profit (used when no override exists)
-    DEFAULT_STOP_LOSS_PCT = 3.0   # 3% stop loss
+    DEFAULT_STOP_LOSS_PCT = 2.0   # 2% stop loss (tightened from 3% on 2026-07-02: winners' median holding-MAE is only -0.7% vs losers -3.3%, so a 2% stop caps losers while sparing most winners; 66-trade path replay improved W:L 0.96->1.30)
     DEFAULT_TAKE_PROFIT_PCT = 0.5  # +0.5% arm trigger for the trailing stop (V3 exit rule, backtested 2026-05-21)
 
     @classmethod

@@ -6,7 +6,7 @@
 
 ## CRITICAL RULES
 
-1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), trailing stop (arm at +0.5%, 1.5% trail floored at -1% of entry), SL (3%), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
+1. **DO NOT modify the trading strategy** - The momentum threshold (0.70), trailing stop (arm at +0.5%, 1.5% trail floored at -1% of entry), SL (2%, tightened from 3% on 2026-07-02), sustained volume filter (vol_min3 >= 1.5x), and LONG-only approach are proven and must not be changed unless explicitly requested.
 
 2. **Always backup before significant changes** - Use the backup commands in CLAUDE.local.md before modifying core logic.
 
@@ -70,7 +70,7 @@ Binance_Bot/
 - **BTC market-regime gate (added 2026-07-02)**: BTC must be above its **daily EMA50**, else NO new longs on any pair. Alts are BTC-correlated; backtest over 66 live trades showed longing into a BTC daily downtrend is where the losses concentrate (net −$71 → −$18, drawdown cut ~2/3). De-risking filter, not an edge. Fails open on data errors.
 
 ### Exit Criteria (V3 rule, backtested & deployed 2026-05-21)
-- Stop Loss: 3% from entry (default, meme coins may differ) — applies until the trail arms
+- Stop Loss: 2% from entry (default, meme coins may differ) — applies until the trail arms. Tightened from 3% on 2026-07-02: winners' median holding-drawdown is only -0.7% vs losers' -3.3%, so a 2% stop caps losers while sparing most winners (66-trade path replay: W:L 0.96→1.30).
 - Trailing stop: arms once price reaches **+0.5%**. After arming, trails with a 1.5% stop from the highest price, **floored at -1% of entry** — so an armed trade can give back at most ~-1%, not the full -3%.
 - The -1% floor (vs the old breakeven floor) lets a winner survive a small post-arm dip and still run; it converts "pop then fade" losers from -3% into ~-1%.
 - Prior rule was arm at +1.3% floored at entry; changed because ~14/22 losers first popped >=0.5% then round-tripped to a full -3% loss.
@@ -110,7 +110,7 @@ MAX_DAILY_LOSS=10
 - `MOMENTUM_THRESHOLD = 0.70` (in momentum_strategy.py)
 - `volume_ratio < 1.5` - current candle volume filter (in momentum_strategy.py)
 - `vol_min3 < 1.5` - sustained volume filter, min of last 3 candles (in momentum_strategy.py)
-- `DEFAULT_STOP_LOSS_PCT = 3.0` - 3% stop loss (in config.py)
+- `DEFAULT_STOP_LOSS_PCT = 2.0` - 2% stop loss (in config.py; was 3.0 until 2026-07-02)
 - `DEFAULT_TAKE_PROFIT_PCT = 0.5` - +0.5% trail arm trigger, then trails (in config.py)
 - `TRAILING_STOP_AFTER_TP = 1.5` - 1.5% trailing stop after arming (in trading_bot.py)
 - `TRAILING_FLOOR_PCT = 1.0` - protective stop floored at -1% of entry after arming (in trading_bot.py)

@@ -485,8 +485,8 @@ class RiskManager:
         """
         Calculate stop loss from entry (per-symbol overrides supported)
 
-        NOTE: Uses per-symbol overrides for meme coins (e.g., 3% for SHIB/BONK),
-        otherwise defaults to 5% for standard pairs.
+        NOTE: Uses per-symbol overrides for meme coins if configured,
+        otherwise defaults to DEFAULT_STOP_LOSS_PCT (2%). ATR is unused.
 
         Args:
             entry_price: Entry price

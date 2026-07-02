@@ -1190,7 +1190,7 @@ class TelegramBot:
             f"Entry: ${entry_price:,.2f}\n"
             f"Size: {size:.6f}\n"
             f"Stop Loss: ${stop_loss:,.2f}\n"
-            f"Exit: 5% Trailing Stop 📈\n"
+            f"Exit: Stop-loss, then trailing (arms +0.5%, 1.5% trail, floor -1%) 📈\n"
             f"Risk: ${abs(entry_price - stop_loss) * size:,.2f}"
         )
         await self.send_notification(message)
