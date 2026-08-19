@@ -121,8 +121,12 @@ class TelegramBot:
             # Get portfolio summary
             summary = self.trading_bot.risk_manager.get_portfolio_summary()
 
-            status_emoji = "✅" if self.trading_bot.is_running else "⏸️"
-            status_text = "RUNNING" if self.trading_bot.is_running else "STOPPED"
+            if not self.trading_bot.is_running:
+                status_emoji, status_text = "🛑", "STOPPED"
+            elif self.trading_bot.trading_paused:
+                status_emoji, status_text = "⏸️", "PAUSED"
+            else:
+                status_emoji, status_text = "✅", "RUNNING"
             mode_emoji = "🔴" if Config.TRADING_MODE == 'live' else "📄"
             mode_text = "LIVE" if Config.TRADING_MODE == 'live' else "PAPER"
 
@@ -748,10 +752,10 @@ class TelegramBot:
                 await update.message.reply_text(message, parse_mode='Markdown')
                 return
 
-            if not self.trading_bot.is_running:
+            if not self.trading_bot.is_running or self.trading_bot.trading_paused:
                 message += (
-                    "⏸️ I'm currently **PAUSED** and not trading.\n"
-                    "Use /resume to start me again.\n"
+                    "⏸️ I'm currently **PAUSED** and not opening new positions.\n"
+                    "Open positions are still managed. Use /resume to start me again.\n"
                 )
                 await update.message.reply_text(message, parse_mode='Markdown')
                 return
@@ -829,7 +833,11 @@ class TelegramBot:
                 runtime = datetime.now() - self.trading_bot.start_time if self.trading_bot.start_time else timedelta(0)
                 hours = int(runtime.total_seconds() // 3600)
                 mins = int((runtime.total_seconds() % 3600) // 60)
-                message += f"✅ Bot Status: Running ({hours}h {mins}m)\n"
+                if self.trading_bot.trading_paused:
+                    message += f"⏸️ Bot Status: Paused ({hours}h {mins}m) - exits managed, no new entries\n"
+                    recommendations.append("Use /resume to re-enable new entries")
+                else:
+                    message += f"✅ Bot Status: Running ({hours}h {mins}m)\n"
             else:
                 message += "❌ Bot Status: Stopped\n"
                 recommendations.append("Use /resume to start the bot")
@@ -1005,12 +1013,17 @@ class TelegramBot:
             return
 
         try:
-            if self.trading_bot and not self.trading_bot.is_running:
-                self.trading_bot.is_running = True
-                await update.message.reply_text("✅ **Bot resumed!** Trading will continue.")
-                await self.send_notification("🟢 **Bot Resumed**\nTrading operations continuing.")
+            if self.trading_bot and self.trading_bot.trading_paused:
+                self.trading_bot.resume_trading()
+                await update.message.reply_text("✅ **Bot resumed!** New entries re-enabled.")
+                await self.send_notification("🟢 **Bot Resumed**\nNew entries re-enabled.")
+            elif self.trading_bot and not self.trading_bot.is_running:
+                await update.message.reply_text(
+                    "⚠️ Bot process is shutting down - /resume cannot restart it. "
+                    "Restart the container instead."
+                )
             else:
-                await update.message.reply_text("ℹ️ Bot is already running")
+                await update.message.reply_text("ℹ️ Bot is already trading (not paused)")
 
         except Exception as e:
             logger.error(f"Error in resume command: {e}")
@@ -1035,7 +1048,7 @@ class TelegramBot:
             "🚨 **EMERGENCY STOP**\n\n"
             "⚠️ WARNING: This will:\n"
             "• Close ALL open positions immediately\n"
-            "• Stop the trading bot\n"
+            "• Pause all new entries (until /resume)\n"
             "• Exit at market prices\n\n"
             "**Use only in emergencies!**\n\n"
             "Are you absolutely sure?",
@@ -1056,6 +1069,12 @@ class TelegramBot:
                 await query.edit_message_text("🚨 **EMERGENCY STOP ACTIVATED**\n\nClosing all positions...")
 
                 if self.trading_bot:
+                    # Pause FIRST (persisted - survives restarts): nothing new can
+                    # open while we close, and an exception mid-close cannot skip
+                    # the pause. Loops keep running so any position that fails to
+                    # close is still managed.
+                    self.trading_bot.pause_trading('telegram /emergency')
+
                     # Close all positions
                     positions = self.trading_bot.risk_manager.get_all_positions()
                     closed_count = 0
@@ -1066,13 +1085,10 @@ class TelegramBot:
                             await self.trading_bot._close_position(pos.symbol, current_price, "Emergency stop")
                             closed_count += 1
 
-                    # Stop bot
-                    self.trading_bot.is_running = False
-
                     await self.send_notification(
                         f"🚨 **EMERGENCY STOP COMPLETE**\n\n"
                         f"Closed {closed_count} positions\n"
-                        f"Bot stopped"
+                        f"New entries PAUSED (survives restarts) - use /resume to re-enable"
                     )
                 else:
                     await query.edit_message_text("⚠️ Trading bot not connected")
@@ -1095,7 +1111,7 @@ class TelegramBot:
         if query.data == 'stop_confirm':
             try:
                 if self.trading_bot:
-                    self.trading_bot.is_running = False
+                    self.trading_bot.pause_trading('telegram /stop')
                     positions = len(self.trading_bot.risk_manager.get_all_positions())
 
                     await query.edit_message_text(

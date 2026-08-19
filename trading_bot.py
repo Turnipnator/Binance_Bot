@@ -5,6 +5,7 @@ Coordinates all strategies, risk management, and order execution
 import asyncio
 import time
 import os
+import json
 import signal
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -23,6 +24,7 @@ from utils.storage_manager import get_storage
 
 # Process lock file to prevent multiple instances
 LOCK_FILE = './data/bot.lock'
+PAUSE_FILE = './data/trading_paused.json'  # persisted /stop-/emergency state
 
 # Generate unique instance ID at startup (changes every time bot starts)
 import uuid
@@ -176,6 +178,9 @@ class BinanceTradingBot:
 
         # Bot state
         self.is_running = False
+        # Paused = no NEW entries; loops, exit management and Telegram keep running.
+        # Persisted to PAUSE_FILE so a container restart cannot silently resume trading.
+        self.trading_paused = False
         self.start_time = None
         self.daily_profit_target_met = False
         self.daily_loss_limit_reached = False
@@ -233,6 +238,9 @@ class BinanceTradingBot:
         logger.info(f"Mode: {Config.TRADING_MODE.upper()}")
         logger.info("="*60 + "\n")
 
+        # Restore persisted paused state (a /stop or /emergency must survive restarts)
+        self._load_pause_state()
+
         # Verify account access
         await self._verify_account()
 
@@ -244,6 +252,16 @@ class BinanceTradingBot:
                 logger.error(f"Failed to start Telegram bot: {e}")
                 logger.warning("Continuing without Telegram bot...")
                 self.telegram_bot = None
+
+        if self.trading_paused and self.telegram_bot:
+            try:
+                await self.telegram_bot.send_notification(
+                    "⏸️ **Started PAUSED**\n\n"
+                    "A previous /stop or /emergency is still in effect - no new entries "
+                    "will be opened until /resume. Open positions are still managed."
+                )
+            except Exception as e:
+                logger.error(f"Could not send paused-state notification: {e}")
 
         # Start trading loops for each symbol
         tasks = []
@@ -347,8 +365,9 @@ class BinanceTradingBot:
                 # Update existing positions
                 await self._update_positions(symbol, latest_data, ta)
 
-                # Check for new opportunities
-                if len(self.risk_manager.positions) < Config.MAX_CONCURRENT_TRADES:
+                # Check for new opportunities (skipped while paused via /stop or
+                # /emergency - exits above are still managed either way)
+                if not self.trading_paused and len(self.risk_manager.positions) < Config.MAX_CONCURRENT_TRADES:
                     await self._check_entry_signals(symbol, latest_data, ta)
 
                 # Wait before next iteration
@@ -881,6 +900,49 @@ class BinanceTradingBot:
 
             except Exception as e:
                 logger.error(f"Error in performance monitoring: {e}")
+
+    def pause_trading(self, reason: str = 'user_request'):
+        """Pause NEW entries only. All loops keep running: open positions stay
+        managed (stop-loss / trailing / MR exits) and Telegram stays responsive.
+        State is persisted so a container restart cannot silently resume trading."""
+        self.trading_paused = True
+        self._persist_pause_state(reason)
+        logger.warning(f"Trading PAUSED ({reason}) - no new entries; open positions still managed")
+
+    def resume_trading(self):
+        """Re-enable new entries after a pause."""
+        self.trading_paused = False
+        self._persist_pause_state('resumed')
+        logger.info("Trading RESUMED - new entries enabled")
+
+    def _load_pause_state(self):
+        """Restore persisted paused state at startup."""
+        try:
+            if os.path.exists(PAUSE_FILE):
+                with open(PAUSE_FILE, 'r') as f:
+                    state = json.load(f)
+                if state.get('paused'):
+                    self.trading_paused = True
+                    logger.warning(
+                        f"Restored PAUSED state (since {state.get('changed_at')}, "
+                        f"reason: {state.get('reason')}) - no new entries until /resume"
+                    )
+        except Exception as e:
+            logger.error(f"Could not read pause state file: {e} - defaulting to ACTIVE")
+
+    def _persist_pause_state(self, reason: str = ''):
+        """Atomically persist the paused flag (tmp file + os.replace)."""
+        try:
+            tmp = PAUSE_FILE + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump({
+                    'paused': self.trading_paused,
+                    'reason': reason,
+                    'changed_at': datetime.now().isoformat(),
+                }, f)
+            os.replace(tmp, PAUSE_FILE)
+        except Exception as e:
+            logger.error(f"Could not persist pause state: {e}")
 
     async def stop(self):
         """Stop the trading bot gracefully"""
