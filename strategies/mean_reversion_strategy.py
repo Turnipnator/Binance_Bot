@@ -2,6 +2,7 @@
 Mean Reversion Strategy
 Exploits price extremes and volatility spikes to profit from returns to mean
 """
+import time
 from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 from loguru import logger
@@ -14,6 +15,8 @@ MR_LIQUID_PAIRS = {
     'LTCUSDT', 'ADAUSDT', 'AVAXUSDT', 'TRXUSDT', 'SUIUSDT',
 }
 MR_RSI_ENTRY = 30.0      # 15m RSI(14) oversold trigger
+MR_PRE_GATE_5M_RSI = 40.0        # cheap 5m pre-gate: skip 15m fetch unless 5m RSI < this
+MR_PREGATE_AUDIT_INTERVAL_S = 900  # divergence-watch: audit vetoes at most every 15 min/pair
 MR_STOP_PCT = 3.0        # 3% hard stop (backtested sl3 variant)
 MR_MAX_HOLD_HOURS = 24   # time-stop
 
@@ -61,6 +64,7 @@ class MeanReversionStrategy:
         self.risk_manager = risk_manager
         self.client = client
         self._sig_cache = None  # stashed 15m computation to avoid double-fetch
+        self._pregate_last_audit = 0.0  # rate limiter for _audit_pre_gate_veto
 
         logger.info(f"Mean reversion strategy initialized for {symbol}")
 
@@ -187,7 +191,8 @@ class MeanReversionStrategy:
         if self.symbol not in MR_LIQUID_PAIRS:
             return False, 0.0, {}
         rsi_5m = technical_data.get('rsi', 50)
-        if rsi_5m is None or rsi_5m >= 40:   # cheap pre-gate, no fetch
+        if rsi_5m is None or rsi_5m >= MR_PRE_GATE_5M_RSI:   # cheap pre-gate, no fetch
+            self._audit_pre_gate_veto(rsi_5m)
             return False, 0.0, {}
         if not self.client:
             logger.warning(f"MR: no client for {self.symbol}, cannot confirm 15m signal")
@@ -210,6 +215,42 @@ class MeanReversionStrategy:
         self._sig_cache = ind
         logger.info(f"✅ MR LONG signal {self.symbol}: 15m RSI={ind['rsi']:.1f}<30, close>EMA200, BTC regime ok (conf {confidence:.2f})")
         return True, confidence, ind
+
+    def _audit_pre_gate_veto(self, rsi_5m) -> None:
+        """Divergence-watch LOGGING ONLY - never affects trading decisions.
+
+        The 5m RSI<40 pre-gate is NOT part of the backtested rule (which is just
+        15m RSI<30 + close>EMA200 + BTC>daily EMA50), so a veto here can hide a
+        signal the backtest would have taken. At most once per 15 min per pair,
+        check whether a genuine 15m signal sits behind the veto and WARN if so.
+        Grep 'MR pre-gate VETO' to build the divergence ledger over time.
+        """
+        now = time.time()
+        if now - self._pregate_last_audit < MR_PREGATE_AUDIT_INTERVAL_S:
+            return
+        self._pregate_last_audit = now
+        if not self.client:
+            return
+        try:
+            ind = self._fetch_15m_indicators()
+            if ind is None:
+                return
+            if ind['rsi'] < MR_RSI_ENTRY and ind['close'] > ind['ema200']:
+                regime = self._btc_daily_regime_ok()
+                rsi_txt = 'n/a' if rsi_5m is None else f"{rsi_5m:.1f}"
+                logger.warning(
+                    f"MR pre-gate VETO of a live signal: {self.symbol} 15m RSI "
+                    f"{ind['rsi']:.1f}<{MR_RSI_ENTRY:.0f}, close>EMA200, BTC regime "
+                    f"{'OK' if regime else 'closed'} - but 5m RSI {rsi_txt} >= "
+                    f"{MR_PRE_GATE_5M_RSI:.0f} blocked it (pre-gate not in backtest)"
+                )
+            else:
+                logger.debug(
+                    f"MR pre-gate audit {self.symbol}: veto inconsequential "
+                    f"(15m RSI {ind['rsi']:.1f}, close {'>' if ind['close'] > ind['ema200'] else '<'} EMA200)"
+                )
+        except Exception as e:
+            logger.debug(f"MR pre-gate audit failed for {self.symbol}: {e}")
 
     def _fetch_15m_indicators(self) -> Optional[Dict]:
         """Fetch 15m klines and compute RSI(14), EMA20, EMA200 on the last bar."""

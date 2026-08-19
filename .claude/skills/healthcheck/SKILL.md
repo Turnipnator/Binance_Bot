@@ -92,6 +92,11 @@ Interpret the output:
   - avgW materially below backtest → **slippage/execution drag** eroding the thin edge (the #1 risk flagged at deploy).
   - Excess `stop_loss` exits (backtest exits mostly at the EMA20 target) → dips reverting less than modeled.
 - Per-strategy split: momentum vs mean_reversion trade counts and P&L are separable because trades are tagged `strategy` in `trades.json`.
+- **Pre-gate divergence ledger (added 2026-08-19)**: the live 5m RSI<40 pre-gate is not in the backtested rule. The bot self-audits vetoes (max 1/15min/pair) and WARNs when a genuine 15m signal was blocked:
+```bash
+ssh -i <SSH_KEY> <USER>@<VPS_IP> "docker logs binance-trading-bot 2>&1 | grep -c 'MR pre-gate VETO'"
+```
+Count these across checks (log retention ~18h, so note the count each run). A recurring nonzero count = the pre-gate is suppressing backtest-valid entries; factor it into any live-vs-backtest verdict alongside the tick-exit mismatch.
 
 The monitor also prints a **STRATEGY HEAD-TO-HEAD**: momentum vs mean_reversion, both under current rules (trades since 2026-07-02 only — earlier momentum trades are old-rule and NOT comparable). It reports each strategy's n / WR / net$ / PF / **expectancy $ per trade**. Read BOTH: net$ = what grows the account, expectancy = edge quality normalised for the fact MR trades far more often than momentum. Needs ~15 trades each before it's meaningful.
 

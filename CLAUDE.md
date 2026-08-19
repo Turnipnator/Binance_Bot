@@ -62,11 +62,15 @@ Binance_Bot/
 ## Trading Strategy (DO NOT MODIFY)
 
 ### Entry Criteria
-- EMA Stack: Bullish trend (EMA 8 > 21 > 50)
+- EMA Stack: Bullish trend — price > EMA20 > EMA50 > EMA200 on 5m
+  (docs previously claimed 8/21/50, but live has ALWAYS run 20/50/200 via .env —
+  the 8/21/50 config existed only in old backtests; confirmed 2026-08-19 audit.
+  Note: with the 200-bar fetch window the "EMA200" behaves as ~SMA200.)
 - Momentum Score: >= 0.70
 - Volume: >= 1.5x average (current candle)
 - Sustained Volume: >= 1.5x average (minimum of last 3 candles)
-- RSI: 40-70 range (not overbought/oversold)
+- RSI: hard reject only ABOVE 70. The "40-70 band" is score-shaping, not a
+  filter — sub-40 RSI zeroes the score's RSI component but does not block entry.
 - 1H HTF gate: pair price above its 1H EMA50
 - **BTC market-regime gate (added 2026-07-02)**: BTC must be above its **daily EMA50**, else NO new longs on any pair. Alts are BTC-correlated; backtest over 66 live trades showed longing into a BTC daily downtrend is where the losses concentrate (net −$71 → −$18, drawdown cut ~2/3). De-risking filter, not an edge. Fails open on data errors.
 
