@@ -91,7 +91,9 @@ class RiskManager:
 
         # Additional safeguards (prevent infinite retry loops)
         self.position_close_attempts: Dict[str, int] = {}  # Track failed close attempts
-        self.max_close_attempts = 3  # Max retries before forcing position removal
+        self.max_close_attempts = 3  # Failed attempts per burst before the breaker pauses closes
+        self.close_breaker_since: Dict[str, float] = {}  # symbol -> breaker trip timestamp
+        self.close_retry_cooldown_s = 900  # 15 min between close-retry bursts
         self.max_position_age_hours = 72  # Remove stale positions after 72 hours (3 days)
 
         # Persistent daily P&L tracking
@@ -309,15 +311,31 @@ class RiskManager:
         attempts = self.position_close_attempts.get(symbol, 0)
 
         if attempts >= self.max_close_attempts:
-            logger.error(
-                f"Failed to close {symbol} {attempts} times - FORCING REMOVAL! "
-                f"This prevents infinite retry loops."
-            )
-            # Force remove position to prevent churning
-            if symbol in self.positions:
-                del self.positions[symbol]
-            # Reset attempt counter
-            self.position_close_attempts[symbol] = 0
+            # Breaker tripped. KEEP the position tracked - the coins are still
+            # held on Binance, and deleting the record here would abandon them
+            # unsold and unmonitored (the bug this replaces). Instead pause
+            # close attempts for a cooldown, then allow a fresh burst.
+            now = datetime.now().timestamp()
+            tripped_at = self.close_breaker_since.get(symbol)
+
+            if tripped_at is None:
+                self.close_breaker_since[symbol] = now
+                logger.critical(
+                    f"Close breaker TRIPPED for {symbol} after {attempts} failed sell "
+                    f"attempts. Position KEPT in tracking; retrying in "
+                    f"{self.close_retry_cooldown_s // 60} min."
+                )
+                return False
+
+            if now - tripped_at >= self.close_retry_cooldown_s:
+                logger.warning(
+                    f"Close breaker cooldown elapsed for {symbol} - allowing a fresh "
+                    f"burst of close attempts"
+                )
+                self.position_close_attempts[symbol] = 0
+                del self.close_breaker_since[symbol]
+                return True
+
             return False
 
         return True

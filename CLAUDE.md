@@ -220,7 +220,10 @@ logging:
 Max 50MB of logs retained.
 
 ### Health Check
-Container is considered healthy if `data/bot.lock` exists (bot is running).
+Container is healthy if `data/heartbeat` was touched within the last 5 minutes
+(every trading-loop iteration touches it) - a hung or dead loop shows as
+unhealthy. Changed 2026-08-19; previously only checked that `data/bot.lock`
+existed, which a hung bot satisfied forever.
 
 ### Data Persistence
 The `data/` directory is mounted as a volume - survives container rebuilds.

@@ -47,8 +47,8 @@ RUN mkdir -p logs data && \
 USER botuser
 
 # Health check - verifies bot process is responding
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-  CMD python -c "import os; exit(0 if os.path.exists('data/bot.lock') else 1)" || exit 1
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+  CMD python -c "import os,time,sys; p='data/heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 300 else 1)" || exit 1
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

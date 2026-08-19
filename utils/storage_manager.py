@@ -5,6 +5,7 @@ Ensures trade history survives bot restarts.
 """
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,9 +96,14 @@ class StorageManager:
             backup_path = filepath.with_suffix('.json.bak')
             shutil.copy2(filepath, backup_path)
 
-        # Write new data
-        with open(filepath, 'w') as f:
+        # Write new data ATOMICALLY (tmp + fsync + rename): a crash mid-write can
+        # no longer truncate/corrupt the live file and silently break all saving.
+        tmp_path = filepath.with_suffix('.json.tmp')
+        with open(tmp_path, 'w') as f:
             json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, filepath)
 
     # =========================================================================
     # TRADE OPERATIONS

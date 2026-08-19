@@ -25,6 +25,7 @@ from utils.storage_manager import get_storage
 # Process lock file to prevent multiple instances
 LOCK_FILE = './data/bot.lock'
 PAUSE_FILE = './data/trading_paused.json'  # persisted /stop-/emergency state
+HEARTBEAT_FILE = './data/heartbeat'        # liveness signal for the Docker healthcheck
 
 # Generate unique instance ID at startup (changes every time bot starts)
 import uuid
@@ -278,7 +279,22 @@ class BinanceTradingBot:
     async def _verify_account(self):
         """Verify account access and display balance"""
         try:
-            balances = self.client.get_account_balance()
+            # get_account_balance swallows API errors and returns {} - an empty
+            # result IS the failure signal. Retry briefly, then fail LOUDLY in
+            # live mode instead of logging "verified" and trading on stale state.
+            balances = {}
+            for attempt in range(3):
+                balances = self.client.get_account_balance()
+                if balances:
+                    break
+                logger.warning(f"Account balance fetch attempt {attempt + 1}/3 returned nothing - retrying in 10s")
+                await asyncio.sleep(10)
+
+            if Config.TRADING_MODE == 'live' and 'USDT' not in balances:
+                raise RuntimeError(
+                    "Account verification FAILED: no USDT balance after 3 attempts "
+                    "(API/connectivity/key problem). Refusing to start on stale balance."
+                )
 
             logger.info("Account verified successfully!")
             logger.info("Current balances:")
@@ -317,6 +333,8 @@ class BinanceTradingBot:
 
         while self.is_running:
             try:
+                self._touch_heartbeat()
+
                 # Check daily limits
                 if await self._check_daily_limits():
                     logger.warning("Daily limits reached, pausing trading")
@@ -660,6 +678,13 @@ class BinanceTradingBot:
                         )
                 else:
                     logger.error(f"Failed to execute entry order for {symbol}")
+                    await self._notify_safe(
+                        f"⚠️ **ENTRY ORDER FAILED**\n\n"
+                        f"{symbol} ({strategy_name})\n"
+                        f"Size: {position_size:.6f} (~${position_value:.2f})\n"
+                        f"The order was rejected or errored - see container logs. "
+                        f"If this repeats, check API permissions / filters / balance."
+                    )
 
             else:
                 # Paper trading mode
@@ -714,6 +739,7 @@ class BinanceTradingBot:
 
                 if order:
                     fill_price = float(order['fills'][0]['price']) if order.get('fills') else exit_price
+                    self.risk_manager.record_close_attempt(symbol, success=True)
                     realized_pnl = self.risk_manager.close_position(symbol, fill_price)
 
                     logger.success(
@@ -729,11 +755,30 @@ class BinanceTradingBot:
                         )
 
                     # Save trade to persistent storage
-                    self._save_trade_to_storage(
+                    if not self._save_trade_to_storage(
                         symbol, position, fill_price, realized_pnl, reason
-                    )
+                    ):
+                        await self._notify_safe(
+                            f"🚨 **TRADE NOT SAVED**\n\n"
+                            f"{symbol} close (P&L ${realized_pnl:.2f}) failed to persist to "
+                            f"trades.json - stats are now OUT OF SYNC.\n"
+                            f"Check data/ file permissions (root-owned files broke saving "
+                            f"for 6 weeks once - see CLAUDE.local.md 2026-07-02)."
+                        )
                 else:
                     logger.error(f"Failed to execute exit order for {symbol}")
+                    self.risk_manager.record_close_attempt(symbol, success=False)
+                    attempts = self.risk_manager.position_close_attempts.get(symbol, 0)
+                    if attempts >= self.risk_manager.max_close_attempts:
+                        await self._notify_safe(
+                            f"🚨 **SELL FAILING: {symbol}**\n\n"
+                            f"{attempts} consecutive close attempts failed - the coins are "
+                            f"STILL HELD and the position stays tracked. The bot pauses "
+                            f"close attempts for {self.risk_manager.close_retry_cooldown_s // 60} min, "
+                            f"then retries.\n"
+                            f"Close reason: {reason}\n"
+                            f"If it keeps failing, sell {position.quantity} manually on Binance."
+                        )
 
             else:
                 # Paper trading mode
@@ -751,9 +796,13 @@ class BinanceTradingBot:
                         )
 
                     # Save trade to persistent storage (paper trading too)
-                    self._save_trade_to_storage(
+                    if not self._save_trade_to_storage(
                         symbol, position, exit_price, realized_pnl, reason
-                    )
+                    ):
+                        await self._notify_safe(
+                            f"🚨 **TRADE NOT SAVED** (paper)\n\n"
+                            f"{symbol} close failed to persist to trades.json - check data/ permissions."
+                        )
 
             # Update strategy state
             strategies = self.strategies[symbol]
@@ -823,10 +872,11 @@ class BinanceTradingBot:
                 'is_win': realized_pnl > 0
             }
 
-            storage.save_trade(trade)
+            return storage.save_trade(trade)
 
         except Exception as e:
             logger.error(f"Error saving trade to storage: {e}")
+            return False
 
     async def _check_daily_limits(self) -> bool:
         """
@@ -873,6 +923,8 @@ class BinanceTradingBot:
             await asyncio.sleep(300)  # Update every 5 minutes
 
             try:
+                self._touch_heartbeat()
+
                 # Check for midnight rollover - reset daily stats
                 today = datetime.now().strftime('%Y-%m-%d')
                 if today != current_day:
@@ -900,6 +952,26 @@ class BinanceTradingBot:
 
             except Exception as e:
                 logger.error(f"Error in performance monitoring: {e}")
+
+    async def _notify_safe(self, message: str):
+        """Send a Telegram notification without ever letting a notify failure
+        break the trading path (send_notification also guards internally)."""
+        if not self.telegram_bot:
+            return
+        try:
+            await self.telegram_bot.send_notification(message)
+        except Exception as e:
+            logger.error(f"Telegram notification failed: {e}")
+
+    def _touch_heartbeat(self):
+        """Update the heartbeat file mtime - the Docker healthcheck fails when
+        this goes stale, so a hung/dead loop finally shows as unhealthy."""
+        try:
+            with open(HEARTBEAT_FILE, 'a'):
+                pass
+            os.utime(HEARTBEAT_FILE, None)
+        except Exception as e:
+            logger.error(f"Could not touch heartbeat file: {e}")
 
     def pause_trading(self, reason: str = 'user_request'):
         """Pause NEW entries only. All loops keep running: open positions stay
