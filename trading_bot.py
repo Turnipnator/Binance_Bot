@@ -307,9 +307,18 @@ class BinanceTradingBot:
                 # Update risk manager balance (LIVE mode only)
                 # In PAPER mode, we want to simulate trading with INITIAL_BALANCE from .env
                 if Config.TRADING_MODE == 'live':
-                    self.risk_manager.balance = usdt_balance
-                    self.risk_manager.initial_balance = usdt_balance
-                    logger.info(f"Balance synced from exchange: ${usdt_balance:,.2f}")
+                    # Equity = USDT + capital deployed in the positions restored from
+                    # positions.json. A restart mid-trade must not shrink the balance
+                    # (and with it position sizing) by the amount currently invested.
+                    deployed = self.risk_manager.deployed_capital()
+                    equity = usdt_balance + deployed
+                    self.risk_manager.balance = equity
+                    self.risk_manager.initial_balance = equity
+                    logger.info(
+                        f"Balance synced from exchange: ${equity:,.2f} "
+                        f"(USDT ${usdt_balance:,.2f} + ${deployed:,.2f} deployed in "
+                        f"{len(self.risk_manager.positions)} restored position(s))"
+                    )
                 else:
                     logger.info(f"Paper mode: Using simulated balance of ${self.risk_manager.balance:,.2f} (testnet has ${usdt_balance:,.2f})")
 

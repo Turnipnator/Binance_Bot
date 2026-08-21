@@ -226,9 +226,13 @@ class RiskManager:
             logger.error(f"Error loading positions: {e}")
             self.positions = {}
 
+    def deployed_capital(self) -> float:
+        """USDT currently tied up in open positions, valued at entry cost."""
+        return sum(p.entry_price * p.quantity for p in self.positions.values())
+
     def sync_balance_from_exchange(self, client) -> bool:
         """
-        Sync balance from exchange (Binance)
+        Sync balance from exchange (Binance) as EQUITY = USDT + deployed capital
 
         Args:
             client: Binance client instance
@@ -239,9 +243,19 @@ class RiskManager:
         try:
             real_balance = client.get_usdt_balance()
             if real_balance > 0:
+                # Equity, not free cash: USDT on the exchange PLUS the capital currently
+                # deployed in open positions (at entry cost). close_position() only adds
+                # realized P&L back, so syncing bare USDT while positions are open would
+                # permanently understate the balance - and position sizing with it.
+                deployed = self.deployed_capital()
+                equity = real_balance + deployed
                 old_balance = self.balance
-                self.balance = real_balance
-                logger.info(f"Balance synced from exchange: ${old_balance:.2f} -> ${real_balance:.2f}")
+                self.balance = equity
+                logger.info(
+                    f"Balance synced from exchange: ${old_balance:.2f} -> ${equity:.2f} "
+                    f"(USDT ${real_balance:.2f} + ${deployed:.2f} deployed in "
+                    f"{len(self.positions)} open position(s))"
+                )
                 return True
             else:
                 logger.warning("Could not sync balance from exchange (got 0)")

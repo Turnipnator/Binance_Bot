@@ -268,7 +268,11 @@ docker logs --tail 100 binance-trading-bot
 Usually rate limiting or connection issues. The bot has built-in retry logic with exponential backoff.
 
 ### Balance not updating
-The bot syncs balance from Binance periodically. Force sync by restarting or wait for next cycle.
+The bot syncs balance from Binance only at startup and on Telegram `/status`; between syncs
+it adds realized P&L to the last synced figure. Since 2026-08-21 a sync records **equity**
+(USDT + capital deployed in open positions at entry cost) — previously it recorded bare USDT,
+so a `/status` or restart with positions open permanently understated the balance and shrank
+position sizing until the next flat restart.
 
 ---
 
