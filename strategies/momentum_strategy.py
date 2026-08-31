@@ -454,30 +454,6 @@ class MomentumStrategy:
 
         return take_profit
 
-    def update_trailing_stop(self, current_price: float, atr: float) -> Optional[float]:
-        """
-        Update trailing stop for momentum trade
-
-        Args:
-            current_price: Current market price
-            atr: Average True Range
-
-        Returns:
-            New trailing stop price or None
-        """
-        if not self.in_position:
-            return None
-
-        # Update highest price
-        if current_price > self.highest_price:
-            self.highest_price = current_price
-
-        # Calculate trailing stop
-        trailing_distance = atr * 1.5
-        new_stop = self.highest_price - trailing_distance
-
-        return new_stop
-
     def enter_position(self, entry_price: float):
         """Mark position as entered"""
         self.in_position = True

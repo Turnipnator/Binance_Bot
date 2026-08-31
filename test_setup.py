@@ -143,20 +143,9 @@ def test_strategies():
     logger.info("Testing strategies...")
 
     try:
-        from strategies.grid_strategy import GridTradingStrategy
         from strategies.momentum_strategy import MomentumStrategy
         from strategies.mean_reversion_strategy import MeanReversionStrategy
         from config import Config
-
-        # Test grid strategy
-        grid = GridTradingStrategy('BTCUSDT', Config.GRID_SPACING_BTC, Config.GRID_LEVELS)
-        grid.setup_grid(50000.0, 10000.0)
-
-        if len(grid.grid_levels) > 0:
-            logger.success(f"✓ Grid strategy working ({len(grid.grid_levels)} levels)")
-        else:
-            logger.error("✗ Grid strategy failed to create levels")
-            return False
 
         # Test momentum strategy
         momentum = MomentumStrategy('BTCUSDT')

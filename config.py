@@ -77,19 +77,12 @@ class Config:
     MAX_CONCURRENT_TRADES = int(os.getenv('MAX_CONCURRENT_TRADES', '5'))
 
     # Strategy Enables
-    ENABLE_GRID_STRATEGY = os.getenv('ENABLE_GRID_STRATEGY', 'true').lower() == 'true'
     ENABLE_MOMENTUM_STRATEGY = os.getenv('ENABLE_MOMENTUM_STRATEGY', 'true').lower() == 'true'
     ENABLE_MEAN_REVERSION = os.getenv('ENABLE_MEAN_REVERSION', 'true').lower() == 'true'
 
-    # Strategy Allocation
-    GRID_ALLOCATION = float(os.getenv('GRID_ALLOCATION', '0.5'))
-    MOMENTUM_ALLOCATION = float(os.getenv('MOMENTUM_ALLOCATION', '0.3'))
-    MEAN_REVERSION_ALLOCATION = float(os.getenv('MEAN_REVERSION_ALLOCATION', '0.2'))
-
-    # Grid Trading Parameters
-    GRID_SPACING_BTC = float(os.getenv('GRID_SPACING_BTC', '0.02'))
-    GRID_SPACING_ALT = float(os.getenv('GRID_SPACING_ALT', '0.05'))
-    GRID_LEVELS = int(os.getenv('GRID_LEVELS', '10'))
+    # Strategy Allocation (cosmetic - sizing is RiskManager's 20%-of-balance rule)
+    MOMENTUM_ALLOCATION = float(os.getenv('MOMENTUM_ALLOCATION', '0.5'))
+    MEAN_REVERSION_ALLOCATION = float(os.getenv('MEAN_REVERSION_ALLOCATION', '0.5'))
 
     # Technical Indicators
     RSI_PERIOD = int(os.getenv('RSI_PERIOD', '14'))
@@ -179,7 +172,7 @@ class Config:
         if cls.MAX_PORTFOLIO_RISK > 0.25:
             errors.append("MAX_PORTFOLIO_RISK should not exceed 25% (0.25)")
 
-        total_allocation = cls.GRID_ALLOCATION + cls.MOMENTUM_ALLOCATION + cls.MEAN_REVERSION_ALLOCATION
+        total_allocation = cls.MOMENTUM_ALLOCATION + cls.MEAN_REVERSION_ALLOCATION
         if abs(total_allocation - 1.0) > 0.01:
             errors.append(f"Strategy allocations must sum to 1.0, currently: {total_allocation}")
 
@@ -189,13 +182,6 @@ class Config:
             return False
 
         return True
-
-    @classmethod
-    def get_grid_spacing(cls, symbol: str) -> float:
-        """Get appropriate grid spacing based on symbol"""
-        if symbol in ['BTCUSDT', 'ETHUSDT']:
-            return cls.GRID_SPACING_BTC
-        return cls.GRID_SPACING_ALT
 
     @classmethod
     def display_config(cls):
@@ -211,7 +197,6 @@ class Config:
         for pair in cls.TRADING_PAIRS:
             print(f"  - {pair}")
         print(f"\nStrategy Allocation:")
-        print(f"  Grid Trading: {cls.GRID_ALLOCATION*100:.0f}%")
         print(f"  Momentum: {cls.MOMENTUM_ALLOCATION*100:.0f}%")
         print(f"  Mean Reversion: {cls.MEAN_REVERSION_ALLOCATION*100:.0f}%")
         print(f"\nRisk Management:")

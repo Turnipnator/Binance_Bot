@@ -583,38 +583,6 @@ class RiskManager:
 
         return take_profit
 
-    def calculate_trailing_stop(
-        self,
-        current_price: float,
-        highest_price: float,
-        atr: float,
-        position_type: str = 'long'
-    ) -> float:
-        """
-        Calculate trailing stop with acceleration
-
-        Args:
-            current_price: Current market price
-            highest_price: Highest price since entry (for long) or lowest (for short)
-            atr: Average True Range
-            position_type: 'long' or 'short'
-
-        Returns:
-            Trailing stop price
-        """
-        # 3% trailing stop - tighter to protect gains
-        # Combined with breakeven stop at 2%, this prevents turning winners into losers
-        TRAILING_STOP_PERCENT = 0.03  # 3%
-
-        if position_type == 'long':
-            # Long: Stop 3% below highest price reached
-            trailing_stop = highest_price * (1 - TRAILING_STOP_PERCENT)
-        else:
-            # Short: Stop 3% above lowest price reached
-            trailing_stop = highest_price * (1 + TRAILING_STOP_PERCENT)
-
-        return trailing_stop
-
     def get_volatility_adjustment(self, volatility_pct: float) -> float:
         """
         Adjust position size based on current volatility

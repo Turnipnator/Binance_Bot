@@ -15,7 +15,6 @@ from config import Config
 from binance_client import ResilientBinanceClient
 from utils.technical_analysis import TechnicalAnalysis
 from utils.risk_manager import RiskManager
-from strategies.grid_strategy import GridTradingStrategy, DynamicGridStrategy
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.mean_reversion_strategy import MeanReversionStrategy, MR_MAX_HOLD_HOURS
 from telegram_bot import TelegramBot
@@ -199,15 +198,6 @@ class BinanceTradingBot:
             Dict of strategies
         """
         strategies = {}
-
-        if Config.ENABLE_GRID_STRATEGY:
-            grid_spacing = Config.get_grid_spacing(symbol)
-            strategies['grid'] = DynamicGridStrategy(
-                symbol=symbol,
-                grid_spacing=grid_spacing,
-                num_levels=Config.GRID_LEVELS,
-                allocation=Config.GRID_ALLOCATION
-            )
 
         if Config.ENABLE_MOMENTUM_STRATEGY:
             strategies['momentum'] = MomentumStrategy(
@@ -575,20 +565,6 @@ class BinanceTradingBot:
                             f"Mean Reversion (confidence: {confidence:.2f})"
                         )
                         return
-
-        # Check grid strategy
-        if 'grid' in strategies:
-            grid_strat = strategies['grid']
-            if not grid_strat.active:
-                should_enter, reason = grid_strat.should_enter_position(current_price, latest_data)
-
-                if should_enter:
-                    logger.info(f"Setting up grid for {symbol}: {reason}")
-                    capital = self.risk_manager.balance * grid_strat.allocation
-                    grid_strat.setup_grid(current_price, capital)
-                    # Grid strategy places its own orders
-                    # For now, we'll just log this
-                    logger.info(f"Grid active for {symbol}")
 
     async def _execute_entry(
         self,
