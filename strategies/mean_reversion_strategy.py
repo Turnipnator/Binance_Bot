@@ -7,12 +7,15 @@ from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 from loguru import logger
 
-# Liquid pairs only for the mean-reversion signal (excludes BONK/TAO where
+# Liquid pairs only for the mean-reversion signal (excludes TAO where
 # slippage is worst and the backtest is least trustworthy). See memory
 # mean-reversion-signal-promising. Backtested 2026-07-02: PF 1.82 @0.2% fees.
+# ZECUSDT added 2026-09-01 (user request): $154M/24h volume, account
+# permission proven by a live probe fill.
 MR_LIQUID_PAIRS = {
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'LINKUSDT',
     'LTCUSDT', 'ADAUSDT', 'AVAXUSDT', 'TRXUSDT', 'SUIUSDT',
+    'ZECUSDT',
 }
 MR_RSI_ENTRY = 30.0      # 15m RSI(14) oversold trigger
 MR_PRE_GATE_5M_RSI = 40.0        # cheap 5m pre-gate: skip 15m fetch unless 5m RSI < this
