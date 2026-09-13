@@ -931,8 +931,9 @@ class BinanceTradingBot:
                 logger.info(f"Daily PnL: ${summary['daily_pnl']:,.2f}")
                 logger.info(f"Open Positions: {summary['open_positions']}")
                 logger.info(f"Portfolio Heat: {summary['portfolio_heat']:.1%}")
-                logger.info(f"Win Rate: {summary['win_rate']:.1f}%")
-                logger.info(f"Total Trades: {summary['total_trades']}")
+                logger.info(f"Win Rate (today): {summary['win_rate']:.1f}% "
+                            f"({summary['winning_trades']}W/{summary['losing_trades']}L)")
+                logger.info(f"Trades: {summary['daily_trades']} today / {summary['total_trades']} since start")
                 logger.info("="*60 + "\n")
 
             except Exception as e:

@@ -134,6 +134,16 @@ class TelegramBot:
             hours = int(runtime.total_seconds() // 3600)
             minutes = int((runtime.total_seconds() % 3600) // 60)
 
+            # Performance figures come from persistent storage (survives restarts and
+            # the midnight reset); the in-memory risk-manager counters are the fallback.
+            storage = get_storage()
+            today_stats = storage.get_today_stats() or {}
+            lifetime = storage.get_lifetime_stats() or {}
+            today_trades = today_stats.get('total_trades', summary['daily_trades'])
+            today_wins = today_stats.get('wins', summary['winning_trades'])
+            today_losses = today_stats.get('losses', summary['losing_trades'])
+            today_wr = (today_wins / today_trades * 100) if today_trades else 0.0
+
             message = (
                 f"{status_emoji} **BOT STATUS: {status_text}** {mode_emoji} **{mode_text}**\n\n"
                 f"**Account Summary:**\n"
@@ -144,11 +154,13 @@ class TelegramBot:
                 f"🔥 Portfolio Heat: {summary['portfolio_heat']:.1%}\n"
                 f"📍 Open Positions: {summary['open_positions']}\n"
                 f"⏱️ Runtime: {hours}h {minutes}m\n\n"
-                f"**Performance:**\n"
-                f"✅ Winning Trades: {summary['winning_trades']}\n"
-                f"❌ Losing Trades: {summary['losing_trades']}\n"
-                f"📊 Win Rate: {summary['win_rate']:.1f}%\n"
-                f"🎯 Total Trades: {summary['total_trades']}"
+                f"**Performance (today):**\n"
+                f"✅ Winning Trades: {today_wins}\n"
+                f"❌ Losing Trades: {today_losses}\n"
+                f"📊 Win Rate: {today_wr:.1f}%\n"
+                f"🎯 Trades Today: {today_trades}\n"
+                f"📚 Lifetime: {lifetime.get('total_trades', 0)} trades, "
+                f"{float(lifetime.get('win_rate', 0)):.1f}% WR (details: /pnl)"
             )
 
             # Add daily target progress

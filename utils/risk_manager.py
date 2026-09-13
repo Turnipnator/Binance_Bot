@@ -810,7 +810,12 @@ class RiskManager:
         total_unrealized = sum(pos.unrealized_pnl for pos in self.positions.values())
         portfolio_heat = self.calculate_portfolio_heat()
 
-        win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
+        # winning_trades/losing_trades are reset by reset_daily_stats() at midnight,
+        # while total_trades counts since process start. Dividing across the two
+        # produced "today's wins / all trades since start" (e.g. 3.8% = 1/26), so
+        # the rate is built from the two daily counters only.
+        closed_today = self.winning_trades + self.losing_trades
+        win_rate = (self.winning_trades / closed_today * 100) if closed_today > 0 else 0
 
         return {
             'balance': self.balance,
@@ -857,8 +862,8 @@ class RiskManager:
         print(f"\nPerformance:")
         print(f"  Daily PnL: ${summary['daily_pnl']:,.2f}")
         print(f"  Daily Trades: {summary['daily_trades']}")
-        print(f"  Total Trades: {summary['total_trades']}")
-        print(f"  Win Rate: {summary['win_rate']:.1f}%")
+        print(f"  Trades since start: {summary['total_trades']}")
+        print(f"  Win Rate (today): {summary['win_rate']:.1f}%")
         print("="*60 + "\n")
 
 
