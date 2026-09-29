@@ -15,11 +15,13 @@ from loguru import logger
 # UNIUSDT and XRPUSDT added 2026-09-18 (user request): both $200M+/24h volume,
 # account permission verified via TRD_GRP permissionSets overlap.
 # UNIUSDT removed 2026-09-23: 0W/3L in MR (-$12.88), 3 of the only 4 MR
-# stop-outs ever. Still traded by momentum.
+# stop-outs ever. Still traded by momentum (until swapped for BCH 2026-09-29).
+# BCHUSDT added 2026-09-29 (user request): permission verified via TRD_GRP
+# overlap. Thinner than the rest (~$18M/24h) but ample for ~$150 orders.
 MR_LIQUID_PAIRS = {
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'LINKUSDT',
     'LTCUSDT', 'ADAUSDT', 'AVAXUSDT', 'TRXUSDT', 'SUIUSDT',
-    'ZECUSDT', 'XRPUSDT',
+    'ZECUSDT', 'XRPUSDT', 'BCHUSDT',
 }
 MR_RSI_ENTRY = 30.0      # 15m RSI(14) oversold trigger
 MR_PRE_GATE_5M_RSI = 40.0        # cheap 5m pre-gate: skip 15m fetch unless 5m RSI < this
