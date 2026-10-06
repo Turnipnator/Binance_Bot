@@ -26,6 +26,11 @@ LOCK_FILE = './data/bot.lock'
 PAUSE_FILE = './data/trading_paused.json'  # persisted /stop-/emergency state
 HEARTBEAT_FILE = './data/heartbeat'        # liveness signal for the Docker healthcheck
 
+# Pairs traded by mean-reversion only (no momentum entries).
+# ZECUSDT removed from momentum 2026-10-06 (user request): 8 momentum trades
+# since 09-13 net -$12.57, the biggest momentum drain. Still in MR_LIQUID_PAIRS.
+MOMENTUM_EXCLUDED_PAIRS = {'ZECUSDT'}
+
 # Generate unique instance ID at startup (changes every time bot starts)
 import uuid
 INSTANCE_ID = str(uuid.uuid4())[:8]
@@ -199,7 +204,7 @@ class BinanceTradingBot:
         """
         strategies = {}
 
-        if Config.ENABLE_MOMENTUM_STRATEGY:
+        if Config.ENABLE_MOMENTUM_STRATEGY and symbol not in MOMENTUM_EXCLUDED_PAIRS:
             strategies['momentum'] = MomentumStrategy(
                 symbol=symbol,
                 allocation=Config.MOMENTUM_ALLOCATION,
