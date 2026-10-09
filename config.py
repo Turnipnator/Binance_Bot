@@ -79,6 +79,10 @@ class Config:
     # Strategy Enables
     ENABLE_MOMENTUM_STRATEGY = os.getenv('ENABLE_MOMENTUM_STRATEGY', 'true').lower() == 'true'
     ENABLE_MEAN_REVERSION = os.getenv('ENABLE_MEAN_REVERSION', 'true').lower() == 'true'
+    ENABLE_TREND_STRATEGY = os.getenv('ENABLE_TREND_STRATEGY', 'false').lower() == 'true'
+    # Fraction of equity per trend pair (BTC, ETH). Real sizing, unlike the cosmetic
+    # allocations below: 0.40 x 2 pairs = up to 80% of equity in trend positions.
+    TREND_ALLOCATION = float(os.getenv('TREND_ALLOCATION', '0.40'))
 
     # Strategy Allocation (cosmetic - sizing is RiskManager's 20%-of-balance rule)
     MOMENTUM_ALLOCATION = float(os.getenv('MOMENTUM_ALLOCATION', '0.5'))

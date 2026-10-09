@@ -207,7 +207,9 @@ class TelegramBot:
                     f"Size: {pos.quantity:.6f}\n"
                     f"{pnl_emoji} P&L: ${pos.unrealized_pnl:,.2f} ({pos.unrealized_pnl_pct:+.2f}%)\n"
                     f"Stop: ${pos.stop_loss:,.2f}\n"
-                    f"Target: ${pos.take_profit:,.2f}\n\n"
+                    + (f"Exit: daily close below SMA50 (trend)\n\n"
+                       if getattr(pos, 'strategy', '') == 'trend'
+                       else f"Target: ${pos.take_profit:,.2f}\n\n")
                 )
 
             # Add total unrealized P&L
@@ -1210,6 +1212,13 @@ class TelegramBot:
     async def notify_trade_opened(self, symbol: str, side: str, entry_price: float,
                                  size: float, stop_loss: float, take_profit: float, strategy: str):
         """Notify when trade is opened"""
+        s = strategy.lower()
+        if s.startswith('trend'):
+            exit_desc = "first daily close below SMA50, or 15% emergency stop 📈"
+        elif 'reversion' in s:
+            exit_desc = "back to the 15m EMA20, 24h time-stop, or the stop-loss 📈"
+        else:
+            exit_desc = "Stop-loss, then trailing (arms +0.5%, 1.5% trail, floor -1%) 📈"
         message = (
             f"🟢 **TRADE OPENED**\n\n"
             f"Symbol: {symbol}\n"
@@ -1218,7 +1227,7 @@ class TelegramBot:
             f"Entry: ${entry_price:,.2f}\n"
             f"Size: {size:.6f}\n"
             f"Stop Loss: ${stop_loss:,.2f}\n"
-            f"Exit: Stop-loss, then trailing (arms +0.5%, 1.5% trail, floor -1%) 📈\n"
+            f"Exit: {exit_desc}\n"
             f"Risk: ${abs(entry_price - stop_loss) * size:,.2f}"
         )
         await self.send_notification(message)

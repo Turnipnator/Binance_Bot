@@ -17,6 +17,7 @@ from utils.technical_analysis import TechnicalAnalysis
 from utils.risk_manager import RiskManager
 from strategies.momentum_strategy import MomentumStrategy
 from strategies.mean_reversion_strategy import MeanReversionStrategy, MR_MAX_HOLD_HOURS
+from strategies.trend_strategy import TrendStrategy, TREND_PAIRS
 from telegram_bot import TelegramBot
 from utils.storage_manager import get_storage
 
@@ -219,6 +220,9 @@ class BinanceTradingBot:
                 risk_manager=self.risk_manager,  # Pass risk manager for percentage-based stops
                 client=self.client  # Pass client for 15m / BTC-daily data
             )
+
+        if Config.ENABLE_TREND_STRATEGY and symbol in TREND_PAIRS:
+            strategies['trend'] = TrendStrategy(symbol=symbol, client=self.client)
 
         logger.info(f"Strategies initialized for {symbol}: {list(strategies.keys())}")
         return strategies
@@ -472,6 +476,18 @@ class BinanceTradingBot:
                     await self._close_position(symbol, current_price, reason)
             return
 
+        # ISOLATED TREND EXIT: hold until the first daily close below the SMA50.
+        # The 15% emergency stop is handled by the generic check above. Trend
+        # positions must never fall through to the momentum V3 trailing below.
+        if getattr(position, 'strategy', 'momentum') == 'trend':
+            trend = self.strategies.get(symbol, {}).get('trend')
+            if trend is not None:
+                should_exit, reason = trend.should_exit()
+                if should_exit:
+                    logger.info(f"📉 Trend exit for {symbol} at ${current_price:.2f}: daily close below SMA50")
+                    await self._close_position(symbol, current_price, reason)
+            return
+
         # TRAILING TP/SL SYSTEM (V3 - backtested 2026-05-21):
         # Phase 1: hard SL at -2% until price reaches the arm trigger (default +0.5%).
         # Phase 2: once armed, trail 1.5% from the highest price, but never let the
@@ -531,6 +547,15 @@ class BinanceTradingBot:
         atr = latest_data['atr']
         atr_pct = latest_data['atr_pct']
 
+        # Check trend strategy first. While the trend is ON for this pair, no other
+        # strategy may take the slot (an MR position would block the trend entry).
+        if 'trend' in strategies:
+            trend_on, trend_reason = strategies['trend'].should_enter()
+            if trend_on:
+                await self._execute_trend_entry(symbol, current_price, atr, atr_pct, trend_reason)
+                return
+            logger.debug(f"Trend {symbol}: no entry ({trend_reason})")
+
         # Check momentum strategy
         if 'momentum' in strategies:
             momentum_strat = strategies['momentum']
@@ -571,6 +596,34 @@ class BinanceTradingBot:
                         )
                         return
 
+    async def _execute_trend_entry(self, symbol: str, price: float, atr: float, atr_pct: float, reason: str):
+        """Size a trend entry at TREND_ALLOCATION of equity (not the 20%-slot
+        RiskManager rule), capped by free USDT. If MR positions have most of the
+        cash tied up, wait for them to close rather than open an undersized
+        position that would then be held for weeks."""
+        target = self.risk_manager.balance * Config.TREND_ALLOCATION
+        if Config.TRADING_MODE == 'live':
+            free = self.client.get_account_balance().get('USDT', {}).get('free', 0.0)
+        else:
+            free = self.risk_manager.balance - self.risk_manager.deployed_capital()
+        value = min(target, free * 0.98)
+        if value < 0.5 * target:
+            now = time.time()
+            last = getattr(self, '_trend_wait_logged', {}).get(symbol, 0)
+            if now - last > 3600:
+                self._trend_wait_logged = {**getattr(self, '_trend_wait_logged', {}), symbol: now}
+                logger.info(
+                    f"Trend {symbol}: signal ON but only ${free:.2f} USDT free "
+                    f"(want ${target:.2f}) - waiting for capital to free up"
+                )
+            return
+        stop_loss = self.strategies[symbol]['trend'].stop_price(price)
+        await self._execute_entry(
+            symbol, price, stop_loss, 0.0, atr, atr_pct,
+            f"Trend ({reason})",
+            size_override=(value / price, value),
+        )
+
     async def _execute_entry(
         self,
         symbol: str,
@@ -579,7 +632,8 @@ class BinanceTradingBot:
         take_profit: float,
         atr: float,
         atr_pct: float,
-        strategy_name: str
+        strategy_name: str,
+        size_override: Optional[tuple] = None
     ):
         """
         Execute entry into new position
@@ -595,28 +649,41 @@ class BinanceTradingBot:
         """
         try:
             # Tag which strategy owns this position (routes exit logic later)
-            strat_tag = 'mean_reversion' if 'reversion' in strategy_name.lower() else 'momentum'
+            name = strategy_name.lower()
+            strat_tag = ('trend' if name.startswith('trend') else
+                         'mean_reversion' if 'reversion' in name else 'momentum')
 
-            # Calculate position size
-            position_size, position_value = self.risk_manager.calculate_position_size(
-                symbol,
-                entry_price,
-                stop_loss,
-                atr,
-                atr_pct
-            )
+            if size_override:
+                # Trend sizing is fixed by TREND_ALLOCATION; the 20% single-position
+                # cap and heat formula in should_allow_new_position don't apply.
+                position_size, position_value = size_override
+                risk_amount = abs(entry_price - stop_loss) * position_size
+                if self.risk_manager.get_position(symbol):
+                    return
+            else:
+                # Calculate position size
+                position_size, position_value = self.risk_manager.calculate_position_size(
+                    symbol,
+                    entry_price,
+                    stop_loss,
+                    atr,
+                    atr_pct
+                )
 
-            # Check if position is allowed
-            risk_amount = abs(entry_price - stop_loss) * position_size
-            can_trade, reason = self.risk_manager.should_allow_new_position(
-                symbol,
-                position_value,
-                risk_amount
-            )
+                # Check if position is allowed
+                risk_amount = abs(entry_price - stop_loss) * position_size
+                can_trade, reason = self.risk_manager.should_allow_new_position(
+                    symbol,
+                    position_value,
+                    risk_amount
+                )
 
-            if not can_trade:
-                logger.warning(f"Position rejected for {symbol}: {reason}")
-                return
+                if not can_trade:
+                    logger.warning(f"Position rejected for {symbol}: {reason}")
+                    return
+
+            exit_desc = ("daily close below SMA50, or 15% emergency stop" if strat_tag == 'trend' else
+                         f"{Config.get_stop_loss_pct(symbol):.1f}% SL / trailing after {Config.get_take_profit_pct(symbol)}% TP")
 
             logger.info(
                 f"\n{'='*60}\n"
@@ -624,7 +691,7 @@ class BinanceTradingBot:
                 f"Strategy: {strategy_name}\n"
                 f"Entry: ${entry_price:.2f}\n"
                 f"Stop Loss: ${stop_loss:.2f} ({((stop_loss-entry_price)/entry_price*100):.2f}%)\n"
-                f"Exit Strategy: {Config.get_stop_loss_pct(symbol):.1f}% SL / trailing after {Config.get_take_profit_pct(symbol)}% TP\n"
+                f"Exit Strategy: {exit_desc}\n"
                 f"Position Size: {position_size:.6f} ({symbol.replace('USDT', '')})\n"
                 f"Position Value: ${position_value:.2f}\n"
                 f"Risk: ${risk_amount:.2f}\n"
@@ -657,6 +724,8 @@ class BinanceTradingBot:
                     elif 'reversion' in strategy_name.lower() and 'mean_reversion' in strategies:
                         mean_price = (stop_loss + take_profit) / 2
                         strategies['mean_reversion'].enter_position(fill_price, mean_price)
+                    elif strat_tag == 'trend' and 'trend' in strategies:
+                        strategies['trend'].enter_position(fill_price)
 
                     logger.success(f"Position opened: {symbol} @ ${fill_price:.2f}")
 
@@ -800,6 +869,10 @@ class BinanceTradingBot:
                 strategies['momentum'].exit_position(exit_price)
             if 'mean_reversion' in strategies:
                 strategies['mean_reversion'].exit_position(exit_price)
+            if 'trend' in strategies and position.strategy == 'trend' and not self.risk_manager.get_position(symbol):
+                strategies['trend'].exit_position(exit_price)
+                if reason == "Stop loss":
+                    strategies['trend'].mark_stopped()  # no re-buy until a close below SMA50
 
         except Exception as e:
             logger.error(f"Error closing position for {symbol}: {e}")
@@ -829,6 +902,7 @@ class BinanceTradingBot:
                 'manual': 'manual',
                 'mean reversion target (reverted to 15m ema20)': 'mean_reversion_target',
                 'mr time exit': 'mr_time_exit',
+                'trend exit': 'trend_exit',
             }
             normalized_reason = reason.lower().replace('[paper]', '').strip()
             exit_reason = reason_map.get(normalized_reason)
