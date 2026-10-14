@@ -426,9 +426,22 @@ class BinanceTradingBot:
         last_known_price = position.current_price if position.current_price > 0 else position.entry_price
         price_change_pct = abs(current_price - last_known_price) / last_known_price * 100
 
+        # A real gap persists across ticks; bad data does not. After 3 consecutive
+        # rejections (~90s) accept the price, otherwise a genuine >5% move (or a
+        # restart after drift from a stale positions.json) would freeze stop and
+        # exit management for this position forever.
+        if not hasattr(self, '_bad_price_streak'):
+            self._bad_price_streak = {}
+
         if price_change_pct > 5:
-            logger.error(f"⚠️ BAD DATA REJECTED for {symbol}: Price ${current_price:.2f} is {price_change_pct:.1f}% from last price ${last_known_price:.2f} - ignoring this tick")
-            return
+            streak = self._bad_price_streak.get(symbol, 0) + 1
+            self._bad_price_streak[symbol] = streak
+            if streak < 3:
+                logger.error(f"⚠️ BAD DATA REJECTED for {symbol}: Price ${current_price:.2f} is {price_change_pct:.1f}% from last price ${last_known_price:.2f} - ignoring this tick ({streak}/3)")
+                return
+            logger.warning(f"⚠️ {symbol}: price ${current_price:.2f} has been {price_change_pct:.1f}% from ${last_known_price:.2f} for {streak} ticks - accepting it as real")
+
+        self._bad_price_streak[symbol] = 0
 
         # Update position price (only after sanity check passes)
         self.risk_manager.update_position_price(symbol, current_price)
